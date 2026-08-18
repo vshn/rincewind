@@ -36,8 +36,8 @@ func TestInventoryIsCurrent(t *testing.T) {
 func inventory(reg *catalog.Registry) string {
 	var b strings.Builder
 	b.WriteString("# Command inventory\n\n")
-	b.WriteString("Generated from the registry — do not edit. Regenerate with\n")
-	b.WriteString("`go test ./cmd -run TestInventory -update`; CI fails when this file is stale.\n")
+	b.WriteString("Generated from the registry — do not edit.\n")
+	b.WriteString("Regenerate with `go test ./cmd -run TestInventory -update`; CI fails when this file is stale.\n")
 
 	for _, group := range reg.Groups() {
 		fmt.Fprintf(&b, "\n## %s — %s\n", group, reg.GroupShort(group))
@@ -52,7 +52,7 @@ func inventory(reg *catalog.Registry) string {
 			}
 			b.WriteString("Actions:\n\n")
 			for _, a := range v.Actions {
-				fmt.Fprintf(&b, "- `%s` (key `%s`) — %s.%s\n", a.Name, a.Key, a.Short, actionTraits(a))
+				fmt.Fprintf(&b, "- `%s` (key `%s`) — %s.\n  %s\n", a.Name, a.Key, a.Short, actionTraits(a))
 				writeParams(&b, "  Parameters", a.Params)
 			}
 		}
@@ -92,5 +92,5 @@ func actionTraits(a catalog.Action) string {
 	if a.Refresh {
 		out = append(out, "re-runs the view")
 	}
-	return " " + strings.Join(out, "; ") + "."
+	return strings.Join(out, "; ") + "."
 }
