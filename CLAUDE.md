@@ -111,6 +111,8 @@ go run . argo apps                       # same view, plain output
 go run . argo apps root --action pause   # act on one application
 go run . argo apps root --action logs    # drill in from the command line
 CGO_ENABLED=0 go build -o aldediggi .    # static, how it ships
+make                                     # lint (golangci-lint), test, build
+make release                             # macOS + Linux binaries in dist/
 ```
 
 The TUI is tested by driving `model.Update` with synthetic messages and asserting on `View().Content` — see `internal/tui/model_test.go`.
