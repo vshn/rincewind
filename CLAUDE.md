@@ -2,7 +2,7 @@
 
 TUI + CLI cluster diagnostic helper for OpenShift/Kubernetes.
 
-**Status: `argo`, `upgrade` and `nodes` are built.**
+**Status: `argo`, `upgrade`, `nodes` and `alerts` are built.**
 Real views with real actions in both the CLI (`--action`,
 `--yes`, action parameters as flags) and the TUI (key bindings,
 confirmation, `/` filter, `<>` scroll, drill-down with a view stack).
@@ -56,6 +56,8 @@ Violating these is what the design exists to prevent:
 - **Reads do not impersonate; only mutations do.**
   `--as` needs the impersonate verb,
   and demanding it to list things would lock people out of the read-only half of the tool.
+  Documented exception: the alerts group, where everything rides through
+  `pod/exec` — privileged either way.
 - **An action receives what the user can see,** filter and selection included.
   `m.target()` in the TUI, never `m.res`.
 - **List reads go through `catalog.fetch[T]`,** never a hand-rolled decode loop.

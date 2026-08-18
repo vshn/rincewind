@@ -97,10 +97,10 @@ Actions:
   Acts on the view's parameter; asks first; re-runs the view.
   Parameters:
 
-- `name` (required) — suspension name
-- `reason` (required) — why upgrades are suspended
-- `start` (required) — start, e.g. 2026-05-25 09:00
-- `end` (required) — end, e.g. 2026-05-25 18:00 or +9h
+  - `name` (required) — suspension name
+  - `reason` (required) — why upgrades are suspended
+  - `start` (required) — start, e.g. 2026-05-25 09:00
+  - `end` (required) — end, e.g. 2026-05-25 18:00 or +9h
 
 - `delete` (key `d`) — Delete the listed upgrade suspensions.
   Acts on the listed rows; asks first; re-runs the view.
@@ -170,3 +170,60 @@ Actions:
   Acts on the listed rows; asks first; re-runs the view.
 - `unpause` (key `P`) — Resume the rollout of the listed pools.
   Acts on the listed rows; asks first; re-runs the view.
+
+## alerts — All things Alertmanager related
+
+### alerts firing — List firing alerts, silenced and inhibited ones included
+
+Parameters:
+
+- `alert` (optional) — limit to one alertname
+
+Actions:
+
+- `detail` (key `enter`) — Show this alert in full.
+  Acts on the listed rows.
+- `silence` (key `s`) — Silence the shown alerts.
+  Acts on the listed rows; asks first; re-runs the view.
+  Parameters:
+
+  - `for` (optional, default "+2h") — until when: wall clock, RFC 3339, or +2h
+  - `comment` (required) — why this is silenced
+
+
+### alerts silences — List silences: what is muted, by whom, until when
+
+Parameters:
+
+- `silence` (optional) — limit to one silence id (a prefix is enough)
+
+Actions:
+
+- `expire` (key `x`) — Expire the listed silences.
+  Acts on the listed rows; asks first; re-runs the view.
+- `create` (key `n`) — Create a silence from explicit matchers.
+  Acts on the view's parameter; asks first; re-runs the view.
+  Parameters:
+
+  - `matchers` (required) — comma-separated, amtool syntax: alertname="Foo",namespace=~"syn.*"
+  - `for` (optional, default "+2h") — until when: wall clock, RFC 3339, or +2h
+  - `comment` (required) — why this is silenced
+
+
+### alerts detail — Show one alert in full: every label and annotation
+
+Reached by drilling in, not listed in the TUI.
+
+Parameters:
+
+- `fingerprint` (required) — alert fingerprint, as the firing view carries it
+
+Actions:
+
+- `silence` (key `s`) — Silence the shown alerts.
+  Acts on the listed rows; asks first; re-runs the view.
+  Parameters:
+
+  - `for` (optional, default "+2h") — until when: wall clock, RFC 3339, or +2h
+  - `comment` (required) — why this is silenced
+

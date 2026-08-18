@@ -9,6 +9,7 @@ how to build one is in [howto-add-view.md](howto-add-view.md).
 | `argo` | built; `ui` pending (needs `internal/platform`) |
 | `upgrade` | built |
 | `nodes` | built |
+| `alerts` | built |
 | `loki`, `pods` | not built yet |
 
 ## argo
@@ -117,3 +118,34 @@ which is where the gap becomes readable;
 - **A pool's `matchExpressions` are refused,
   not ignored** — rendering only the `matchLabels` half would list the wrong nodes,
   which is worse than saying no.
+
+## alerts
+
+Every call is `kubectl exec` into the Alertmanager pod, running `amtool` with JSON output.
+There is no unprivileged way in — `pod/exec` is a privileged verb — so this is the one group whose reads impersonate;
+the reads-do-not-impersonate invariant documents the exception.
+The flip side is a non-goal worth stating: while Alertmanager itself is down, this group is blind.
+
+```
+ALERT             SEVERITY  STATE     SINCE             NAMESPACE    SUMMARY
+pipeline                    ok                                       the Watchdog alert is firing
+KubeNodeNotReady  critical  firing    2026-08-18 09:48  kube-system  worker-03 not ready
+TargetDown        warning   silenced  2026-08-17 09:12  syn          10% of targets down
+```
+
+- **The first row is a pipeline verdict.**
+  The `Watchdog` alert must always fire;
+  when it is missing, the alerting pipeline itself is broken and an empty list would be a lie.
+  The verdict is judged before any filter, so a narrowed view cannot cry wolf.
+- **`silenced` and `inhibited` alerts stay in the list.**
+  A silenced alert is still firing, and during an upgrade those are exactly the ones worth seeing.
+  Alertmanager lumps both under "suppressed"; the STATE column names the reason, because the next step differs.
+- **Silencing an alert matches on `alertname` plus `namespace`, not on all labels.**
+  All labels would pin the silence to a pod name and die on the next restart.
+  When several shown alerts share the alertname, the matcher falls back to the alertname alone,
+  which is how the CLI silences an alert firing in more than one namespace.
+  The confirmation shows the matchers, so what gets muted is visible before it happens.
+- **The author is the local user**, because amtool's default would be whoever runs inside the pod: nobody.
+- **`expire` skips already-expired silences** rather than letting one stale row fail the whole call.
+- **No silence editing.**
+  Changing one means expire and recreate, until an `extend` action earns its keep.

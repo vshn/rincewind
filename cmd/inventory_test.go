@@ -46,25 +46,25 @@ func inventory(reg *catalog.Registry) string {
 			if v.Hidden {
 				b.WriteString("Reached by drilling in, not listed in the TUI.\n\n")
 			}
-			writeParams(&b, "Parameters", v.Params)
+			writeParams(&b, "", v.Params)
 			if len(v.Actions) == 0 {
 				continue
 			}
 			b.WriteString("Actions:\n\n")
 			for _, a := range v.Actions {
 				fmt.Fprintf(&b, "- `%s` (key `%s`) — %s.\n  %s\n", a.Name, a.Key, a.Short, actionTraits(a))
-				writeParams(&b, "  Parameters", a.Params)
+				writeParams(&b, "  ", a.Params)
 			}
 		}
 	}
 	return b.String()
 }
 
-func writeParams(b *strings.Builder, label string, params []catalog.Param) {
+func writeParams(b *strings.Builder, indent string, params []catalog.Param) {
 	if len(params) == 0 {
 		return
 	}
-	fmt.Fprintf(b, "%s:\n\n", label)
+	fmt.Fprintf(b, "%sParameters:\n\n", indent)
 	for _, p := range params {
 		req := "optional"
 		if p.Required {
@@ -73,7 +73,7 @@ func writeParams(b *strings.Builder, label string, params []catalog.Param) {
 		if p.Default != "" {
 			req += fmt.Sprintf(", default %q", p.Default)
 		}
-		fmt.Fprintf(b, "- `%s` (%s) — %s\n", p.Name, req, p.Short)
+		fmt.Fprintf(b, "%s- `%s` (%s) — %s\n", indent, p.Name, req, p.Short)
 	}
 	b.WriteString("\n")
 }

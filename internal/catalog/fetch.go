@@ -49,6 +49,16 @@ func fetch[T any, P interface {
 		docs = list.Items
 	}
 
+	return decodeDocs[T, P](docs, kind, c.Describe(args...))
+}
+
+// decodeDocs turns raw documents into typed objects, shared by fetch and by
+// the amtool path, which gets its documents from a JSON array instead of a
+// kubectl List.
+func decodeDocs[T any, P interface {
+	*T
+	fetchable
+}](docs []json.RawMessage, kind, source string) ([]T, error) {
 	out := make([]T, 0, len(docs))
 	for _, doc := range docs {
 		var t T
@@ -57,7 +67,7 @@ func fetch[T any, P interface {
 			return nil, fmt.Errorf("decoding %s: %w", kind, err)
 		}
 		if p.name() == "" {
-			return nil, fmt.Errorf("%s: response is not %q", c.Describe(args...), kind)
+			return nil, fmt.Errorf("%s: response is not %q", source, kind)
 		}
 		p.keep(doc)
 		out = append(out, t)
