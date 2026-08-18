@@ -68,3 +68,15 @@ type Navigate struct {
 func (Text) isResult()     {}
 func (Table) isResult()    {}
 func (Navigate) isResult() {}
+
+// lessByTrouble sorts unsynced before synced, unhealthy before healthy, then
+// by name.
+func lessByTrouble(aSynced, aHealthy bool, aName string, bSynced, bHealthy bool, bName string) bool {
+	if aSynced != bSynced {
+		return !aSynced
+	}
+	if aHealthy != bHealthy {
+		return !aHealthy
+	}
+	return aName < bName
+}

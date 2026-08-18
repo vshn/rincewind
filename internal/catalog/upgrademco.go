@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
-	"time"
 
 	"github.com/vshn/aldediggi/internal/kube"
 )
@@ -248,13 +246,3 @@ func mcoLogs(ctx context.Context, c kube.Client) (Result, error) {
 	}
 	return Text{Lines: lines}, nil
 }
-
-func showTimeOf(rfc3339 string) string {
-	at, err := time.Parse(time.RFC3339, rfc3339)
-	if err != nil {
-		return rfc3339
-	}
-	return showTime(at)
-}
-
-func joinNames(names []string) string { return strings.Join(names, ", ") }

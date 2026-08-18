@@ -258,15 +258,6 @@ func upgradeHooks(ctx context.Context, c kube.Client, job string) (Result, error
 	return t, nil
 }
 
-func firstText(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
 func jobNames(ctx context.Context, c kube.Client) ([]string, error) {
 	jobs, err := listJobs(ctx, c, "")
 	if err != nil {

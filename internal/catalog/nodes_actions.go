@@ -2,7 +2,6 @@ package catalog
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -28,7 +27,7 @@ func cordonAction(c kube.Client, cordon bool) Action {
 		Scope:   Rows,
 		Refresh: true,
 		Confirm: func(in Result, _ Args) string {
-			names := nodeNamesIn(in)
+			names := namesIn[node](in)
 			msg := fmt.Sprintf("%s %d node(s): %s?", verb, len(names), joinNames(names))
 			if cordon {
 				// Draining is deliberately not offered; say what this does and
@@ -105,7 +104,7 @@ func oneNodeName(in Result, args Args) (string, error) {
 		return name, nil
 	}
 
-	names := nodeNamesIn(in)
+	names := namesIn[node](in)
 	switch len(names) {
 	case 1:
 		return names[0], nil
@@ -116,44 +115,8 @@ func oneNodeName(in Result, args Args) (string, error) {
 	}
 }
 
-func nodeNamesIn(in Result) []string {
-	t, ok := in.(Table)
-	if !ok {
-		return nil
-	}
-
-	var out []string
-	for _, src := range t.Sources() {
-		raw, ok := src.(json.RawMessage)
-		if !ok {
-			continue
-		}
-		var n node
-		if err := json.Unmarshal(raw, &n); err == nil && n.Metadata.Name != "" {
-			out = append(out, n.Metadata.Name)
-		}
-	}
-	return out
-}
-
 func onePool(in Result) (machineConfigPool, error) {
-	t, ok := in.(Table)
-	if !ok {
-		return machineConfigPool{}, fmt.Errorf("this action needs a table, got %T", in)
-	}
-
-	var pools []machineConfigPool
-	for _, src := range t.Sources() {
-		raw, ok := src.(json.RawMessage)
-		if !ok {
-			continue
-		}
-		var p machineConfigPool
-		if err := json.Unmarshal(raw, &p); err == nil && p.Metadata.Name != "" {
-			pools = append(pools, p)
-		}
-	}
-
+	pools := rowsIn[machineConfigPool](in)
 	switch len(pools) {
 	case 1:
 		return pools[0], nil

@@ -2,7 +2,6 @@ package catalog
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -66,7 +65,7 @@ func openLogs() Action {
 // oneApp insists on a single application. Drilling into several at once has
 // no meaning, and the message says how to narrow it down.
 func oneApp(in Result) (string, error) {
-	names := appNamesIn(in)
+	names := namesIn[application](in)
 	switch len(names) {
 	case 1:
 		return names[0], nil
@@ -85,7 +84,7 @@ func pauseAction(c kube.Client) Action {
 		Short:   "Pause auto-sync on the listed applications",
 		Refresh: true,
 		Confirm: func(in Result, _ Args) string {
-			names := appNamesIn(in)
+			names := namesIn[application](in)
 			if hasRoot(names) {
 				return fmt.Sprintf("Pause auto-sync on %s?", describeApps(names))
 			}
@@ -107,8 +106,8 @@ func unpauseAction(c kube.Client) Action {
 		Confirm: func(in Result, _ Args) string {
 			// Says "set", not "restore": the previous value is not recorded
 			// anywhere, so this writes the default. See docs/views.md.
-			msg := fmt.Sprintf("Set auto-sync (prune, selfHeal) on %s?", describeApps(appNamesIn(in)))
-			if !hasRoot(appNamesIn(in)) {
+			msg := fmt.Sprintf("Set auto-sync (prune, selfHeal) on %s?", describeApps(namesIn[application](in)))
+			if !hasRoot(namesIn[application](in)) {
 				msg += fmt.Sprintf("\n\n%q stays paused; unpause it separately when you are done.", rootApp)
 			}
 			return msg
@@ -176,7 +175,7 @@ func patchApps(c kube.Client, patch string, also ...string) func(context.Context
 		// kubectl takes either -f or a name, not both.
 		lines := out.(Text).Lines
 		for _, name := range also {
-			if hasRoot(appNamesIn(in)) && name == rootApp {
+			if hasRoot(namesIn[application](in)) && name == rootApp {
 				continue // already in the set
 			}
 			extra, err := c.Output(ctx, "patch", "applications.argoproj.io", name, "--type", "merge", "-p", patch)
@@ -187,27 +186,6 @@ func patchApps(c kube.Client, patch string, also ...string) func(context.Context
 		}
 		return Text{Lines: lines}, nil
 	}
-}
-
-// appNamesIn reads the names back out of the rows the view produced.
-func appNamesIn(in Result) []string {
-	t, ok := in.(Table)
-	if !ok {
-		return nil
-	}
-
-	var out []string
-	for _, src := range t.Sources() {
-		raw, ok := src.(json.RawMessage)
-		if !ok {
-			continue
-		}
-		var a application
-		if err := json.Unmarshal(raw, &a); err == nil && a.Metadata.Name != "" {
-			out = append(out, a.Metadata.Name)
-		}
-	}
-	return out
 }
 
 func hasRoot(names []string) bool {
@@ -233,12 +211,4 @@ func describeApps(names []string) string {
 	default:
 		return fmt.Sprintf("%d applications (%s, …)", len(names), strings.Join(names[:3], ", "))
 	}
-}
-
-func splitLines(s string) []string {
-	s = strings.TrimRight(s, "\n")
-	if s == "" {
-		return nil
-	}
-	return strings.Split(s, "\n")
 }

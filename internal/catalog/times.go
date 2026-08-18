@@ -78,3 +78,11 @@ func showDuration(d time.Duration) string {
 		return fmt.Sprintf("%dm", mins)
 	}
 }
+
+func showTimeOf(rfc3339 string) string {
+	at, err := time.Parse(time.RFC3339, rfc3339)
+	if err != nil {
+		return rfc3339
+	}
+	return showTime(at)
+}

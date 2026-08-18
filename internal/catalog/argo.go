@@ -284,26 +284,9 @@ func argoSyncStatus(ctx context.Context, c kube.Client, app string) (Result, err
 // resources it does not track, and those are not what anyone is hunting for.
 func healthy(status string) bool { return status == "" || status == "Healthy" }
 
-// lessByTrouble sorts unsynced before synced, unhealthy before healthy, then
-// by name.
-func lessByTrouble(aSynced, aHealthy bool, aName string, bSynced, bHealthy bool, bName string) bool {
-	if aSynced != bSynced {
-		return !aSynced
-	}
-	if aHealthy != bHealthy {
-		return !aHealthy
-	}
-	return aName < bName
-}
-
 func shortRevision(rev string) string {
 	if len(rev) > 7 {
 		return rev[:7]
 	}
 	return rev
-}
-
-// oneLine keeps a multi-line message from breaking the table layout.
-func oneLine(s string) string {
-	return strings.Join(strings.Fields(strings.ReplaceAll(s, "\n", " ")), " ")
 }

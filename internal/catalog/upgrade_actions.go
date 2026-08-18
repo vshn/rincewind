@@ -175,20 +175,7 @@ func describeSuspension(args Args, now time.Time) string {
 // suspensionsIn reads the names back out of the rows, and separates the ones
 // that ArgoCD owns.
 func suspensionsIn(in Result) (names, fromArgo []string) {
-	t, ok := in.(Table)
-	if !ok {
-		return nil, nil
-	}
-
-	for _, src := range t.Sources() {
-		raw, ok := src.(json.RawMessage)
-		if !ok {
-			continue
-		}
-		var w suspension
-		if err := json.Unmarshal(raw, &w); err != nil || w.Metadata.Name == "" {
-			continue
-		}
+	for _, w := range rowsIn[suspension](in) {
 		names = append(names, w.Metadata.Name)
 		if w.source() == "argocd" {
 			fromArgo = append(fromArgo, w.Metadata.Name)
@@ -238,7 +225,7 @@ func oneJob(in Result, args Args) (string, error) {
 		return job, nil
 	}
 
-	names := jobNamesIn(in)
+	names := namesIn[upgradeJob](in)
 	switch len(names) {
 	case 1:
 		return names[0], nil
@@ -247,26 +234,6 @@ func oneJob(in Result, args Args) (string, error) {
 	default:
 		return "", fmt.Errorf("select one job first (%d shown; tab into the list, or filter)", len(names))
 	}
-}
-
-func jobNamesIn(in Result) []string {
-	t, ok := in.(Table)
-	if !ok {
-		return nil
-	}
-
-	var out []string
-	for _, src := range t.Sources() {
-		raw, ok := src.(json.RawMessage)
-		if !ok {
-			continue
-		}
-		var j upgradeJob
-		if err := json.Unmarshal(raw, &j); err == nil && j.Metadata.Name != "" {
-			out = append(out, j.Metadata.Name)
-		}
-	}
-	return out
 }
 
 // poolPauseAction stops or resumes a MachineConfigPool's rollout. Pausing one
@@ -287,7 +254,7 @@ func poolPauseAction(c kube.Client, pause bool) Action {
 		Scope:   Rows,
 		Refresh: true,
 		Confirm: func(in Result, _ Args) string {
-			names := poolNamesIn(in)
+			names := namesIn[machineConfigPool](in)
 			msg := fmt.Sprintf("%s the rollout of %d pool(s): %s?", verb, len(names), joinNames(names))
 			if pause {
 				msg += "\n\nNodes in a paused pool keep their current config until it is resumed."
@@ -298,55 +265,4 @@ func poolPauseAction(c kube.Client, pause bool) Action {
 			return patchRows(ctx, c, in, patch)
 		},
 	}
-}
-
-// patchRows merge-patches every object the view showed.
-func patchRows(ctx context.Context, c kube.Client, in Result, patch string) (Result, error) {
-	return runOnRows(ctx, in, func(list []byte) ([]byte, error) {
-		return c.Input(ctx, list, "patch", "-f", "-", "--type", "merge", "-p", patch)
-	})
-}
-
-// runOnRows hands the objects behind the rows to kubectl on stdin, so the set
-// acted on is exactly the set on screen.
-func runOnRows(_ context.Context, in Result, run func(list []byte) ([]byte, error)) (Result, error) {
-	t, ok := in.(Table)
-	if !ok {
-		return nil, fmt.Errorf("this action needs a table, got %T", in)
-	}
-
-	sources := t.Sources()
-	if len(sources) == 0 {
-		return nil, fmt.Errorf("nothing to act on")
-	}
-
-	list, err := kube.ListOf(sources)
-	if err != nil {
-		return nil, err
-	}
-	out, err := run(list)
-	if err != nil {
-		return nil, err
-	}
-	return Text{Lines: splitLines(string(out))}, nil
-}
-
-func poolNamesIn(in Result) []string {
-	t, ok := in.(Table)
-	if !ok {
-		return nil
-	}
-
-	var out []string
-	for _, src := range t.Sources() {
-		raw, ok := src.(json.RawMessage)
-		if !ok {
-			continue
-		}
-		var p machineConfigPool
-		if err := json.Unmarshal(raw, &p); err == nil && p.Metadata.Name != "" {
-			out = append(out, p.Metadata.Name)
-		}
-	}
-	return out
 }
