@@ -22,7 +22,7 @@ func TestTableColumnsAreAligned(t *testing.T) {
 	var buf bytes.Buffer
 	tbl := catalog.Table{
 		Cols: []string{"NAME", "STATUS"},
-		Rows: [][]string{{"a", "Ready"}, {"much-longer-name", "NotReady"}},
+		Rows: []catalog.Row{{Cells: []string{"a", "Ready"}}, {Cells: []string{"much-longer-name", "NotReady"}}},
 	}
 	if err := CLI(&buf, tbl); err != nil {
 		t.Fatal(err)
@@ -45,7 +45,7 @@ func TestTableColumnsAreAligned(t *testing.T) {
 // piped into grep and friends.
 func TestPipedOutputHasNoEscapeCodes(t *testing.T) {
 	var buf bytes.Buffer
-	tbl := catalog.Table{Cols: []string{"NAME"}, Rows: [][]string{{"a"}}}
+	tbl := catalog.Table{Cols: []string{"NAME"}, Rows: []catalog.Row{{Cells: []string{"a"}}}}
 	if err := CLI(&buf, tbl); err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestUnsupportedResultIsAnError(t *testing.T) {
 func TestStyledHeaderStaysAligned(t *testing.T) {
 	tbl := catalog.Table{
 		Cols: []string{"NAME", "STATUS"},
-		Rows: [][]string{{"master-000000", "Ready"}, {"a", "NotReady"}},
+		Rows: []catalog.Row{{Cells: []string{"master-000000", "Ready"}}, {Cells: []string{"a", "NotReady"}}},
 	}
 
 	var buf bytes.Buffer

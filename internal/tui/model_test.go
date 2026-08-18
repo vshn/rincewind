@@ -27,7 +27,7 @@ func key(s string) tea.KeyPressMsg {
 // nothing renders before that.
 func sized(t *testing.T) *model {
 	t.Helper()
-	m := newModel(catalog.Demo())
+	m := newModel(sampleRegistry())
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	return next.(*model)
 }
@@ -91,7 +91,7 @@ func TestResultIsRenderedIntoTable(t *testing.T) {
 	m.Update(key("down")) // demo.table
 	m.Update(key("enter"))
 
-	res, err := m.selected().Run(context.Background())
+	res, err := m.selected().Run(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -156,47 +156,13 @@ func TestSidebarListsGroupsAndViews(t *testing.T) {
 	}
 }
 
-// Columns that add up to more than the pane make the table widget wrap rows,
-// which silently pushes the help line off screen.
-func TestColumnsNeverExceedAvailableWidth(t *testing.T) {
-	tbl := catalog.Table{
-		Cols: []string{"NAME", "STATUS", "AGE", "MESSAGE"},
-		Rows: [][]string{{"master-000000", "NotReady", "112d", strings.Repeat("x", 200)}},
-	}
-
-	for _, avail := range []int{20, 40, 63, 120, 400} {
-		total := 0
-		for _, c := range columns(tbl, avail) {
-			total += c.Width + 2 // the widget pads each cell by one column
-		}
-		if total > avail && avail >= 40 {
-			t.Errorf("avail=%d: columns total %d", avail, total)
-		}
-	}
-}
-
-// A very narrow pane must still yield usable columns rather than zero or
-// negative widths.
-func TestColumnsStayPositiveWhenCramped(t *testing.T) {
-	tbl := catalog.Table{
-		Cols: []string{"NAME", "MESSAGE"},
-		Rows: [][]string{{"node-1", strings.Repeat("x", 300)}},
-	}
-
-	for _, c := range columns(tbl, 10) {
-		if c.Width < 1 {
-			t.Errorf("column %q has width %d", c.Title, c.Width)
-		}
-	}
-}
-
 func TestHelpLineSurvivesNarrowWindows(t *testing.T) {
-	m := newModel(catalog.Demo())
+	m := newModel(sampleRegistry())
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 12})
 	m = next.(*model)
 
 	m.Update(key("down"))
-	res, err := m.selected().Run(context.Background())
+	res, err := m.selected().Run(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,18 +187,18 @@ func TestTitleShowsIDAndDescription(t *testing.T) {
 
 	for _, want := range []string{"aldediggi", cur.ID(), cur.Short} {
 		if !strings.Contains(title, want) {
-			t.Errorf("title %q missing %q", visible(title), want)
+			t.Errorf("title %q missing %q", visibleOnly(title), want)
 		}
 	}
 }
 
 // A long description must not push the id off screen.
 func TestTitleDropsDescriptionWhenTooNarrow(t *testing.T) {
-	m := newModel(catalog.Demo())
+	m := newModel(sampleRegistry())
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 30, Height: 20})
 	m = next.(*model)
 
-	title := visible(strings.Split(m.View().Content, "\n")[0])
+	title := visibleOnly(strings.Split(m.View().Content, "\n")[0])
 	if !strings.Contains(title, "demo.text") {
 		t.Errorf("title lost the id: %q", title)
 	}
@@ -244,32 +210,13 @@ func TestTitleDropsDescriptionWhenTooNarrow(t *testing.T) {
 func TestTitleAndHelpAreSetOffByBlankLines(t *testing.T) {
 	lines := strings.Split(sized(t).View().Content, "\n")
 
-	if got := visible(lines[1]); strings.TrimSpace(got) != "" {
+	if got := visibleOnly(lines[1]); strings.TrimSpace(got) != "" {
 		t.Errorf("line below the title is %q, want blank", got)
 	}
-	if got := visible(lines[len(lines)-2]); strings.TrimSpace(got) != "" {
+	if got := visibleOnly(lines[len(lines)-2]); strings.TrimSpace(got) != "" {
 		t.Errorf("line above the help is %q, want blank", got)
 	}
 	if !strings.Contains(lines[len(lines)-1], "quit") {
-		t.Errorf("last line is not the help line: %q", visible(lines[len(lines)-1]))
-	}
-}
-
-// visible strips SGR sequences so that layout can be asserted the way a
-// terminal shows it.
-func visible(s string) string {
-	var b strings.Builder
-	for {
-		i := strings.Index(s, "\x1b[")
-		if i < 0 {
-			b.WriteString(s)
-			return b.String()
-		}
-		b.WriteString(s[:i])
-		j := strings.IndexByte(s[i:], 'm')
-		if j < 0 {
-			return b.String()
-		}
-		s = s[i+j+1:]
+		t.Errorf("last line is not the help line: %q", visibleOnly(lines[len(lines)-1]))
 	}
 }

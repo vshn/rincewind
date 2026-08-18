@@ -4,38 +4,54 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/table"
+	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/vshn/aldediggi/internal/catalog"
+	"github.com/vshn/aldediggi/internal/render"
 )
 
 const (
-	sidebarWidth = 30
-	chromeHeight = 4 // title and help line, each with a blank line inside
-	contentPad   = 2 // gap between the divider and the output
-	minColWidth  = 3 // a shrunken column still has to show something
+	sidebarWidth    = 30
+	chromeHeight    = 4 // title and help line, each with a blank line inside
+	actionBarHeight = 2 // divider plus the action list
+	contentPad      = 2 // gap between the divider and the output
 )
 
+// runTimeout bounds a single kubectl call. Without it an unreachable API
+// server leaves the spinner turning with no way back.
+const runTimeout = 30 * time.Second
+
 var (
-	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
-	groupStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("8"))
-	selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
-	descStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
-	sepStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	errStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	sidebarStyle  = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder(), false, true, false, false).
-			BorderForeground(lipgloss.Color("8")).
-			Width(sidebarWidth).
-			PaddingRight(1)
+	titleStyle       = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	groupStyle       = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("8"))
+	selectedStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	descStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
+	keyStyle         = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	dividerStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	promptStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11"))
+	clusterStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("5"))
+	headerStyle      = lipgloss.NewStyle().Bold(true)
+	selectedRowStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	badStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+	warnStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+	goodStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	sepStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	helpStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	errStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+	sidebarStyle     = lipgloss.NewStyle().
+				Border(lipgloss.NormalBorder(), false, true, false, false).
+				BorderForeground(lipgloss.Color("8")).
+				Width(sidebarWidth).
+				PaddingRight(1)
 	contentStyle = lipgloss.NewStyle().PaddingLeft(contentPad)
 )
 
@@ -54,9 +70,35 @@ type resultMsg struct {
 	err error
 }
 
+// pane names the half of the screen that has the keyboard.
+type pane int
+
+const (
+	paneList pane = iota
+	paneOutput
+)
+
+// frame remembers a view so that drilling in can be undone.
+type frame struct {
+	view catalog.View
+	args catalog.Args
+}
+
 type model struct {
+	reg *catalog.Registry
+
 	entries []entry
 	cursor  int
+
+	// current is what the output pane shows. It is not always the entry under
+	// the sidebar cursor: drilling in reaches views that are not listed.
+	current *catalog.View
+	stack   []frame
+
+	focus pane
+	// row is the selected data row, and therefore what an action acts on
+	// while the output pane has focus.
+	row int
 
 	width, height int
 
@@ -64,32 +106,67 @@ type model struct {
 	tickAlive bool
 
 	vp    viewport.Model
-	tbl   table.Model
 	ready bool
+
+	lookupCluster func(context.Context) (string, error)
 
 	seq     int
 	running bool
 	res     catalog.Result
 	err     error
+
+	// args are the parameters the current result was produced with; an action
+	// and a refresh have to use the same ones.
+	args catalog.Args
+
+	// cluster is shown wherever acting on the wrong one would be expensive.
+	cluster string
+
+	// cancel stops the run in flight, on escape or on quit.
+	cancel context.CancelFunc
+
+	// pending holds an action waiting for the user to answer its confirmation.
+	pending *catalog.Action
+	prompt  string
+
+	// filter narrows what is shown — and therefore what an action operates
+	// on, which is the whole point of not having row selection.
+	filter    textinput.Model
+	filtering bool
 }
 
-// Run starts the TUI and blocks until the user quits.
-func Run(reg *catalog.Registry) error {
+// clusterMsg carries the current kubectl context, looked up once at startup.
+type clusterMsg struct{ name string }
+
+// Run starts the TUI and blocks until the user quits. lookupCluster may be nil.
+func Run(reg *catalog.Registry, lookupCluster func(context.Context) (string, error)) error {
 	m := newModel(reg)
-	_, err := tea.NewProgram(m).Run()
+	m.lookupCluster = lookupCluster
+
+	prog := tea.NewProgram(m)
+	_, err := prog.Run()
+
+	// Whatever was still running has no one left to report to.
+	m.stop()
 	return err
 }
 
 func newModel(reg *catalog.Registry) *model {
 	m := &model{
+		reg:  reg,
 		spin: spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 		vp:   viewport.New(),
-		tbl:  table.New(table.WithFocused(true)),
 	}
+	m.filter = textinput.New()
+	m.filter.Prompt = "/"
 
 	for _, group := range reg.Groups() {
+		listed := reg.Listed(group)
+		if len(listed) == 0 {
+			continue
+		}
 		m.entries = append(m.entries, entry{label: group})
-		for _, v := range reg.InGroup(group) {
+		for _, v := range listed {
 			m.entries = append(m.entries, entry{label: v.Name, view: &v})
 		}
 	}
@@ -114,14 +191,76 @@ func (m *model) next(i, step int) int {
 	return 0
 }
 
-func (m *model) selected() *catalog.View {
+// listView is the entry under the sidebar cursor.
+func (m *model) listView() *catalog.View {
 	if m.cursor < 0 || m.cursor >= len(m.entries) {
 		return nil
 	}
 	return m.entries[m.cursor].view
 }
 
-func (m *model) Init() tea.Cmd { return nil }
+// selected is the view whose output is on screen.
+func (m *model) selected() *catalog.View {
+	if m.current != nil {
+		return m.current
+	}
+	return m.listView()
+}
+
+// visible is the result after filtering: what the output pane renders.
+func (m *model) visible() catalog.Result {
+	return filtered(m.res, m.filter.Value())
+}
+
+// target is what an action operates on. With the output pane focused that is
+// the selected row; otherwise it is everything the filter left. The CLI
+// reaches the same two cases through the view's parameter and through no
+// parameter at all.
+func (m *model) target() catalog.Result {
+	vis := m.visible()
+
+	tbl, ok := vis.(catalog.Table)
+	if !ok || m.focus != paneOutput || len(tbl.Rows) == 0 {
+		return vis
+	}
+
+	row := min(max(m.row, 0), len(tbl.Rows)-1)
+	return catalog.Table{Cols: tbl.Cols, Emphasis: tbl.Emphasis, Rows: tbl.Rows[row : row+1]}
+}
+
+// rowCount is how many rows the output pane is showing.
+func (m *model) rowCount() int {
+	if tbl, ok := m.visible().(catalog.Table); ok {
+		return len(tbl.Rows)
+	}
+	return 0
+}
+
+func (m *model) Init() tea.Cmd {
+	if m.lookupCluster == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
+		defer cancel()
+
+		name, err := m.lookupCluster(ctx)
+		if err != nil {
+			// Not knowing the cluster is not worth an error pane; the label
+			// simply stays empty.
+			return clusterMsg{}
+		}
+		return clusterMsg{name: name}
+	}
+}
+
+// stop cancels the run in flight, if any.
+func (m *model) stop() {
+	if m.cancel != nil {
+		m.cancel()
+		m.cancel = nil
+	}
+}
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -139,8 +278,31 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.seq != m.seq {
 			return m, nil
 		}
+		m.cancel = nil
+
+		// An action that moves rather than reports: follow it instead of
+		// trying to render it.
+		if to, ok := msg.res.(catalog.Navigate); ok && msg.err == nil {
+			m.running = false
+			return m, m.navigate(to)
+		}
+
 		m.running, m.res, m.err = false, msg.res, msg.err
+
+		// Escape is a decision, not a failure. A deadline is a failure, but
+		// one worth naming plainly.
+		switch {
+		case errors.Is(msg.err, context.Canceled):
+			m.err = nil
+		case errors.Is(msg.err, context.DeadlineExceeded):
+			m.err = fmt.Errorf("timed out after %s", runTimeout)
+		}
+
 		m.showResult()
+		return m, nil
+
+	case clusterMsg:
+		m.cluster = msg.name
 		return m, nil
 
 	case spinner.TickMsg:
@@ -157,40 +319,273 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
+	key := msg.String()
+
+	// A pending confirmation swallows every key, so that a stray j or p cannot
+	// answer a question about deleting things.
+	if m.pending != nil {
+		switch key {
+		case "y", "Y":
+			act := *m.pending
+			m.pending, m.prompt = nil, ""
+			return m, m.runAction(act)
+		default:
+			m.pending, m.prompt = nil, ""
+			return m, nil
+		}
+	}
+
+	// While typing a filter the input owns the keyboard, or "q" would quit
+	// halfway through a word.
+	if m.filtering {
+		switch key {
+		case "enter":
+			m.filtering = false
+			m.filter.Blur()
+			return m, nil
+		case "esc":
+			m.filtering = false
+			m.filter.Blur()
+			m.filter.SetValue("")
+			m.showResult()
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.filter, cmd = m.filter.Update(msg)
+		m.showResult()
+		return m, cmd
+	}
+
+	switch key {
 	case "q", "ctrl+c":
+		m.stop()
 		return m, tea.Quit
 
+	case "/":
+		if m.res == nil {
+			return m, nil
+		}
+		m.filtering = true
+		return m, m.filter.Focus()
+
+	case "tab":
+		return m, m.toggleFocus()
+
+	case "esc":
+		switch {
+		case m.running:
+			m.stop()
+		case m.filter.Value() != "":
+			m.filter.SetValue("")
+			m.showResult()
+		case len(m.stack) > 0:
+			return m, m.back()
+		}
+		return m, nil
+
 	case "up", "k":
-		m.cursor = m.next(m.cursor, -1)
+		m.move(-1)
 		return m, nil
 
 	case "down", "j":
-		m.cursor = m.next(m.cursor, +1)
+		m.move(+1)
 		return m, nil
 
-	case "enter", "r":
+	case "r":
 		return m, m.start()
+
+	case "enter":
+		// In the list, enter runs the highlighted view. In the output pane it
+		// drills in, if the view offers somewhere to go.
+		if m.focus == paneList {
+			m.current, m.stack = nil, nil
+			return m, m.start()
+		}
+		if act, ok := m.actionFor("enter"); ok {
+			return m, m.arm(act)
+		}
+		return m, nil
+	}
+
+	// Action bindings come from the registry, so they can only fire once a
+	// result exists for them to act on.
+	if act, ok := m.actionFor(key); ok {
+		return m, m.arm(act)
 	}
 
 	// Anything else scrolls the output pane.
 	return m, m.forwardToPane(msg)
 }
 
-// start launches the selected view. Nothing blocks here: the work happens
-// inside a tea.Cmd, which is what keeps the UI responsive while it runs.
+// actionFor resolves a key to an action of the current view. Navigation and
+// quit are matched first above, so config can never claim them.
+func (m *model) actionFor(key string) (catalog.Action, bool) {
+	cur := m.selected()
+	if cur == nil || m.res == nil || m.running || m.filtering {
+		return catalog.Action{}, false
+	}
+	for _, a := range cur.Actions {
+		if a.Key == key {
+			return a, true
+		}
+	}
+	return catalog.Action{}, false
+}
+
+// toggleFocus moves the keyboard between the list and the output. Only worth
+// doing when the output has rows to land on.
+func (m *model) toggleFocus() tea.Cmd {
+	if m.focus == paneList {
+		if m.rowCount() == 0 {
+			return nil
+		}
+		m.focus, m.row = paneOutput, 0
+	} else {
+		m.focus = paneList
+	}
+	m.showResult()
+	return nil
+}
+
+// move steps the cursor of whichever pane has focus.
+func (m *model) move(step int) {
+	if m.focus == paneList {
+		m.cursor = m.next(m.cursor, step)
+		return
+	}
+
+	if n := m.rowCount(); n > 0 {
+		m.row = min(max(m.row+step, 0), n-1)
+		m.showResult()
+	}
+}
+
+// back returns to the view that was drilled in from.
+func (m *model) back() tea.Cmd {
+	last := m.stack[len(m.stack)-1]
+	m.stack = m.stack[:len(m.stack)-1]
+
+	view := last.view
+	m.current, m.args = &view, last.args
+	return m.runCurrent(last.args)
+}
+
+// navigate drills into another view, remembering where it came from.
+func (m *model) navigate(to catalog.Navigate) tea.Cmd {
+	next, ok := m.reg.Get(to.View)
+	if !ok {
+		m.err = fmt.Errorf("no such view: %s", to.View)
+		return nil
+	}
+
+	if cur := m.selected(); cur != nil {
+		m.stack = append(m.stack, frame{view: *cur, args: m.args})
+	}
+	m.current, m.args = &next, to.Args
+	return m.runCurrent(to.Args)
+}
+
+// arm either asks first or runs straight away.
+func (m *model) arm(act catalog.Action) tea.Cmd {
+	if act.Confirm != nil {
+		if prompt := act.Confirm(m.target()); prompt != "" {
+			m.pending, m.prompt = &act, prompt
+			return nil
+		}
+	}
+	return m.runAction(act)
+}
+
+// runAction runs the action against the result currently on screen, then
+// re-runs the view if the action changed anything.
+func (m *model) runAction(act catalog.Action) tea.Cmd {
+	cur := m.selected()
+	if cur == nil || m.res == nil {
+		return nil
+	}
+
+	m.stop()
+	m.seq++
+	m.running, m.err = true, nil
+
+	ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
+	m.cancel = cancel
+
+	seq, in, args := m.seq, m.target(), m.args
+	run := func() tea.Msg {
+		defer cancel()
+
+		out, err := act.Run(ctx, in, args)
+		if err != nil {
+			return resultMsg{seq: seq, err: err}
+		}
+		if _, moving := out.(catalog.Navigate); moving || !act.Refresh {
+			return resultMsg{seq: seq, res: out}
+		}
+
+		// Showing the view again matters more than showing what the action
+		// printed: after a pause the AUTO column is the answer.
+		res, err := cur.Run(ctx, args)
+		return resultMsg{seq: seq, res: res, err: err}
+	}
+
+	if m.tickAlive {
+		return run
+	}
+	m.tickAlive = true
+	return tea.Batch(run, m.spin.Tick)
+}
+
+// start runs the view the sidebar cursor is on. Nothing blocks here: the work
+// happens inside a tea.Cmd, which is what keeps the UI responsive while it
+// runs.
 func (m *model) start() tea.Cmd {
 	cur := m.selected()
 	if cur == nil {
 		return nil
 	}
 
+	bound, err := cur.Bind(nil)
+	if err != nil {
+		// A view with a required parameter has nothing to run on. Saying so
+		// beats running it with an empty value, which for syncstatus would
+		// show some arbitrary application's resources as if they were the
+		// answer. Such views are Hidden and reached by drilling in.
+		m.running, m.res, m.err = false, nil, err
+		return nil
+	}
+	return m.runCurrent(bound)
+}
+
+// runCurrent runs whatever view is selected with the given parameters.
+func (m *model) runCurrent(args catalog.Args) tea.Cmd {
+	cur := m.selected()
+	if cur == nil {
+		return nil
+	}
+
+	if cur.Available != nil {
+		if err := cur.Available(); err != nil {
+			m.running, m.res, m.err = false, nil, err
+			return nil
+		}
+	}
+
+	m.args = args
+
+	m.stop()
 	m.seq++
 	m.running, m.res, m.err = true, nil, nil
+	m.filter.SetValue("")
+	m.focus, m.row = paneList, 0
+
+	ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
+	m.cancel = cancel
 
 	seq := m.seq
 	run := func() tea.Msg {
-		res, err := cur.Run(context.Background())
+		defer cancel()
+		res, err := cur.Run(ctx, args)
 		return resultMsg{seq: seq, res: res, err: err}
 	}
 
@@ -203,22 +598,87 @@ func (m *model) start() tea.Cmd {
 	return tea.Batch(run, m.spin.Tick)
 }
 
+// forwardToPane scrolls the output. Both Text and Table live in the viewport,
+// because the table is rendered to lines by internal/render rather than by a
+// widget with a layout of its own.
 func (m *model) forwardToPane(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
-	switch m.res.(type) {
-	case catalog.Table:
-		m.tbl, cmd = m.tbl.Update(msg)
-	case catalog.Text:
-		m.vp, cmd = m.vp.Update(msg)
-	}
+	m.vp, cmd = m.vp.Update(msg)
 	return cmd
 }
 
 func (m *model) bodyHeight() int {
-	if h := m.height - chromeHeight; h > 0 {
+	if h := m.height - chromeHeight - m.actionBarLines(); h > 0 {
 		return h
 	}
 	return 1
+}
+
+// actionBarLines is the vertical space the bar takes. A confirmation gets as
+// many lines as it needs: truncating it would drop the cluster name, which is
+// the part most worth reading.
+func (m *model) actionBarLines() int {
+	if len(m.actions()) == 0 {
+		return 0
+	}
+	if m.pending != nil {
+		return 1 + lipgloss.Height(m.promptBlock()) // divider plus the question
+	}
+	if m.filterLine() != "" {
+		return actionBarHeight + 1
+	}
+	return actionBarHeight
+}
+
+// filterLine shows the filter and what it left, because an action acts on the
+// remainder and the count is the only warning of that.
+func (m *model) filterLine() string {
+	if !m.filtering && m.filter.Value() == "" {
+		return ""
+	}
+
+	line := m.filter.View()
+	if !m.filtering {
+		line = dividerStyle.Render("/" + m.filter.Value())
+	}
+	if n, ok := shownCount(m.visible()); ok {
+		line += dividerStyle.Render(fmt.Sprintf("   %d of %d", n, mustCount(m.res)))
+	}
+	return line
+}
+
+func shownCount(res catalog.Result) (int, bool) {
+	switch r := res.(type) {
+	case catalog.Table:
+		return len(r.Rows), true
+	case catalog.Text:
+		return len(r.Lines), true
+	}
+	return 0, false
+}
+
+func mustCount(res catalog.Result) int {
+	n, _ := shownCount(res)
+	return n
+}
+
+// promptBlock wraps the question and puts the cluster on its own line.
+func (m *model) promptBlock() string {
+	wrap := lipgloss.NewStyle().Width(m.contentWidth())
+
+	block := wrap.Render(promptStyle.Render(m.prompt + " [y/N]"))
+	if m.cluster != "" {
+		block = lipgloss.JoinVertical(lipgloss.Left, block,
+			dividerStyle.Render("cluster: ")+clusterStyle.Render(m.cluster))
+	}
+	return block
+}
+
+func (m *model) actions() []catalog.Action {
+	if cur := m.selected(); cur != nil {
+		return cur.Actions
+	}
+	return nil
 }
 
 // contentWidth is the space the output widgets may actually paint on: the
@@ -234,65 +694,79 @@ func (m *model) contentWidth() int {
 func (m *model) resize() {
 	m.vp.SetWidth(m.contentWidth())
 	m.vp.SetHeight(m.bodyHeight())
-	m.tbl.SetWidth(m.contentWidth())
-	m.tbl.SetHeight(m.bodyHeight())
 	m.showResult()
+}
+
+// filtered narrows a result to the rows or lines that match.
+func filtered(res catalog.Result, needle string) catalog.Result {
+	needle = strings.ToLower(strings.TrimSpace(needle))
+	if needle == "" || res == nil {
+		return res
+	}
+
+	switch r := res.(type) {
+	case catalog.Table:
+		out := catalog.Table{Cols: r.Cols, Emphasis: r.Emphasis}
+		for _, row := range r.Rows {
+			if strings.Contains(strings.ToLower(strings.Join(row.Cells, " ")), needle) {
+				out.Rows = append(out.Rows, row)
+			}
+		}
+		return out
+
+	case catalog.Text:
+		var out catalog.Text
+		for _, line := range r.Lines {
+			if strings.Contains(strings.ToLower(line), needle) {
+				out.Lines = append(out.Lines, line)
+			}
+		}
+		return out
+	}
+	return res
 }
 
 // showResult feeds the current Result into whichever widget can display it.
 // The same Result also goes through render.CLI in non-interactive mode.
 func (m *model) showResult() {
-	switch r := m.res.(type) {
+	switch r := m.visible().(type) {
 	case catalog.Text:
 		m.vp.SetContent(strings.Join(r.Lines, "\n"))
 	case catalog.Table:
-		m.tbl.SetColumns(columns(r, m.contentWidth()))
-		m.tbl.SetRows(rows(r))
-	}
-}
-
-// columns sizes each column to its widest cell, then shrinks the last one if
-// the total would overflow the pane.
-func columns(t catalog.Table, avail int) []table.Column {
-	widths := make([]int, len(t.Cols))
-	for i, c := range t.Cols {
-		widths[i] = lipgloss.Width(c)
-	}
-	for _, row := range t.Rows {
-		for i, cell := range row {
-			if i < len(widths) && lipgloss.Width(cell) > widths[i] {
-				widths[i] = lipgloss.Width(cell)
-			}
+		selected := -1
+		if m.focus == paneOutput && len(r.Rows) > 0 {
+			m.row = min(max(m.row, 0), len(r.Rows)-1)
+			selected = m.row
 		}
+		m.vp.SetContentLines(render.Table(r, m.contentWidth(), tableStyle(selected)))
 	}
-
-	// The table widget pads every cell by one column on each side.
-	const gutter = 2
-	total := 0
-	for _, w := range widths {
-		total += w + gutter
-	}
-
-	// Take the overflow off the last column, which is the free-text one.
-	// Clamping rather than giving up keeps rows on a single line; an
-	// unshrinkable table is truncated by the widget instead of wrapping.
-	if last := len(widths) - 1; last >= 0 && total > avail {
-		widths[last] = max(widths[last]-(total-avail), minColWidth)
-	}
-
-	cols := make([]table.Column, len(t.Cols))
-	for i, c := range t.Cols {
-		cols[i] = table.Column{Title: c, Width: widths[i]}
-	}
-	return cols
 }
 
-func rows(t catalog.Table) []table.Row {
-	out := make([]table.Row, 0, len(t.Rows))
-	for _, r := range t.Rows {
-		out = append(out, table.Row(r))
+// tableStyle mirrors the CLI palette and adds the selection. Both modes go
+// through render.Style, so they cannot drift on which values count as trouble.
+//
+// selected is -1 when no row is highlighted. The emphasis colours are dropped
+// on that row: a highlight has to survive the whole line, and the reset code
+// at the end of a coloured cell would cut it short.
+func tableStyle(selected int) render.Style {
+	return render.Style{
+		Header: func(s string) string { return headerStyle.Render(s) },
+		Cell: func(row int, e catalog.Emphasis, s string) string {
+			if row == selected {
+				return selectedRowStyle.Render(s)
+			}
+			switch e {
+			case catalog.Bad:
+				return badStyle.Render(s)
+			case catalog.Warn:
+				return warnStyle.Render(s)
+			case catalog.Good:
+				return goodStyle.Render(s)
+			default:
+				return s
+			}
+		},
 	}
-	return out
 }
 
 func (m *model) View() tea.View {
@@ -304,36 +778,99 @@ func (m *model) View() tea.View {
 		return v
 	}
 
+	pane := m.content()
+	if bar := m.actionBar(); bar != "" {
+		pane = lipgloss.JoinVertical(lipgloss.Left, pane, bar)
+	}
+
 	body := lipgloss.JoinHorizontal(
 		lipgloss.Top,
-		sidebarStyle.Height(m.bodyHeight()).Render(m.sidebar()),
-		contentStyle.Height(m.bodyHeight()).Render(m.content()),
+		m.sidebarBorder().Height(m.bodyHeight()+m.actionBarLines()).Render(m.sidebar()),
+		contentStyle.Render(pane),
 	)
 
 	v.Content = lipgloss.JoinVertical(lipgloss.Left, m.title(), "", body, "", m.help())
 	return v
 }
 
-// title reads tool · id · description, the third part being the same sentence
-// `--help` prints for that command.
+// title reads tool · id · description, with the cluster right-aligned. The
+// description is the first thing dropped when space runs short: the id and the
+// cluster are what you navigate and what you must not get wrong.
 func (m *model) title() string {
 	sep := sepStyle.Render("  ·  ")
-	parts := []string{titleStyle.Render("aldediggi")}
+	sepWidth := lipgloss.Width(sep)
 
-	if cur := m.selected(); cur != nil {
-		parts = append(parts, titleStyle.Render(cur.ID()))
-		if cur.Short != "" {
-			parts = append(parts, descStyle.Render(cur.Short))
+	name := titleStyle.Render("aldediggi")
+	cluster := m.clusterLabel()
+
+	cur := m.selected()
+	if cur == nil {
+		return name
+	}
+
+	id := cur.ID()
+	if len(m.stack) > 0 {
+		id = m.stack[0].view.ID() + " › " + id
+	}
+	if arg := m.argLabel(); arg != "" {
+		id += " " + arg
+	}
+
+	line := name + sep + titleStyle.Render(id)
+
+	// Everything below needs a known width; before the first WindowSizeMsg
+	// there is none to budget against.
+	if m.width <= 0 {
+		return line
+	}
+
+	room := m.width - lipgloss.Width(line)
+	if cluster != "" {
+		room -= lipgloss.Width(cluster) + 1
+	}
+
+	if cur.Short != "" && room > sepWidth+lipgloss.Width(cur.Short) {
+		line += sep + descStyle.Render(cur.Short)
+	}
+
+	if cluster != "" {
+		if gap := m.width - lipgloss.Width(line) - lipgloss.Width(cluster); gap > 0 {
+			line += strings.Repeat(" ", gap) + cluster
 		}
 	}
+	return lipgloss.NewStyle().MaxWidth(m.width).Render(line)
+}
 
-	line := strings.Join(parts, sep)
-
-	// Drop the description before the id scrolls off on a narrow window.
-	if m.width > 0 && lipgloss.Width(line) > m.width && len(parts) == 3 {
-		line = strings.Join(parts[:2], sep)
+// argLabel names the parameters the current view was run with, so a drilled
+// view says which application it is about.
+func (m *model) argLabel() string {
+	cur := m.selected()
+	if cur == nil {
+		return ""
 	}
-	return line
+	var vals []string
+	for _, p := range cur.Params {
+		if v := m.args.Get(p.Name); v != "" {
+			vals = append(vals, v)
+		}
+	}
+	return strings.Join(vals, " ")
+}
+
+func (m *model) clusterLabel() string {
+	if m.cluster == "" {
+		return ""
+	}
+	return clusterStyle.Render("⎈ " + m.cluster)
+}
+
+// sidebarBorder brightens the divider on the side that has the keyboard, so
+// tab has something visible to show for itself.
+func (m *model) sidebarBorder() lipgloss.Style {
+	if m.focus == paneList {
+		return sidebarStyle.BorderForeground(lipgloss.Color("6"))
+	}
+	return sidebarStyle.BorderForeground(lipgloss.Color("8"))
 }
 
 func (m *model) sidebar() string {
@@ -345,8 +882,10 @@ func (m *model) sidebar() string {
 				b.WriteString("\n")
 			}
 			b.WriteString(groupStyle.Render(e.label) + "\n")
-		case i == m.cursor:
+		case i == m.cursor && m.focus == paneList:
 			b.WriteString(selectedStyle.Render("▸ "+e.label) + "\n")
+		case i == m.cursor:
+			b.WriteString(dividerStyle.Render("▸ "+e.label) + "\n")
 		default:
 			b.WriteString("  " + e.label + "\n")
 		}
@@ -354,7 +893,19 @@ func (m *model) sidebar() string {
 	return b.String()
 }
 
+// content renders the output pane, padded to a fixed height so that the action
+// bar underneath does not jump around as results change size.
 func (m *model) content() string {
+	// Height pads, MaxHeight clamps. Width is deliberately not set: the
+	// widgets already size themselves to contentWidth, and re-wrapping their
+	// output here would add lines and push the help line off screen.
+	return lipgloss.NewStyle().
+		Height(m.bodyHeight()).
+		MaxHeight(m.bodyHeight()).
+		Render(m.pane())
+}
+
+func (m *model) pane() string {
 	switch {
 	case m.err != nil:
 		return errStyle.Render("error: " + m.err.Error())
@@ -366,14 +917,78 @@ func (m *model) content() string {
 		return helpStyle.Render("press ⏎ to run")
 	}
 
-	switch m.res.(type) {
-	case catalog.Table:
-		return m.tbl.View()
-	default:
-		return m.vp.View()
+	return m.vp.View()
+}
+
+// actionBar lists what can be done with what is on screen. A pending
+// confirmation replaces it, so the question sits where the answer is expected.
+func (m *model) actionBar() string {
+	acts := m.actions()
+	if len(acts) == 0 {
+		return ""
+	}
+
+	divider := dividerStyle.Render(strings.Repeat("─", max(m.contentWidth(), 1)))
+
+	if m.pending != nil {
+		return lipgloss.JoinVertical(lipgloss.Left, divider, m.promptBlock())
+	}
+
+	parts := make([]string, 0, len(acts))
+	for _, a := range acts {
+		label := a.Name
+		if a.Short != "" {
+			label = a.Name
+		}
+		parts = append(parts, keyStyle.Render(a.Key)+" "+label)
+	}
+
+	line := lipgloss.NewStyle().MaxWidth(m.contentWidth()).Render(strings.Join(parts, dividerStyle.Render("  ·  ")))
+	if m.res == nil || m.running {
+		// Nothing to act on yet; show the bindings but do not pretend they work.
+		line = dividerStyle.Render(visibleOnly(line))
+	}
+
+	if f := m.filterLine(); f != "" {
+		return lipgloss.JoinVertical(lipgloss.Left, divider, f, line)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, divider, line)
+}
+
+// visibleOnly strips styling so a disabled bar can be recoloured as a whole.
+func visibleOnly(s string) string {
+	var b strings.Builder
+	for {
+		i := strings.Index(s, "\x1b[")
+		if i < 0 {
+			b.WriteString(s)
+			return b.String()
+		}
+		b.WriteString(s[:i])
+		j := strings.IndexByte(s[i:], 'm')
+		if j < 0 {
+			return b.String()
+		}
+		s = s[i+j+1:]
 	}
 }
 
 func (m *model) help() string {
-	return helpStyle.Render("↑↓ navigate  ·  ⏎ run  ·  r reload  ·  q quit")
+	switch {
+	case m.pending != nil:
+		return helpStyle.Render("y confirm  ·  any other key cancels")
+	case m.filtering:
+		return helpStyle.Render("⏎ keep filter  ·  esc clear")
+	case m.running:
+		return helpStyle.Render("esc cancel  ·  q quit")
+	}
+
+	keys := []string{"↑↓ move", "⇥ focus", "/ filter", "r reload", "q quit"}
+	if m.focus == paneList {
+		keys = append([]string{"⏎ run"}, keys...)
+	}
+	if len(m.stack) > 0 {
+		keys = append(keys, "esc back")
+	}
+	return helpStyle.Render(strings.Join(keys, "  ·  "))
 }

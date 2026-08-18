@@ -4,14 +4,21 @@
 package render
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"os"
-	"strings"
-	"text/tabwriter"
 
 	"github.com/vshn/aldediggi/internal/catalog"
+)
+
+// ANSI codes rather than lipgloss styles: the CLI decides on styling from the
+// writer, not from a terminal it may not be attached to.
+const (
+	ansiReset  = "\x1b[0m"
+	ansiBold   = "\x1b[1m"
+	ansiRed    = "\x1b[31m"
+	ansiYellow = "\x1b[33m"
+	ansiGreen  = "\x1b[32m"
 )
 
 // CLI writes res to w for non-interactive use. Replaces the `column -t` the
@@ -41,38 +48,35 @@ func cli(w io.Writer, res catalog.Result, style bool) error {
 }
 
 func writeTable(w io.Writer, t catalog.Table, style bool) error {
-	// Laid out into a buffer first. tabwriter counts an escape sequence as
-	// cell content (see the Escape docs in text/tabwriter), so styling before
-	// the layout shifts the styled row out of alignment with the rest.
-	var buf bytes.Buffer
-	tw := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
-
-	if _, err := fmt.Fprintln(tw, strings.Join(t.Cols, "\t")); err != nil {
-		return err
-	}
-	for _, row := range t.Rows {
-		if _, err := fmt.Fprintln(tw, strings.Join(row, "\t")); err != nil {
+	// Unbounded: a pipe has no width, and a terminal wraps on its own rather
+	// than losing a column silently.
+	for _, line := range Table(t, 0, cliStyle(style)) {
+		if _, err := fmt.Fprintln(w, line); err != nil {
 			return err
 		}
 	}
-	if err := tw.Flush(); err != nil {
-		return err
-	}
+	return nil
+}
 
-	if !style {
-		_, err := w.Write(buf.Bytes())
-		return err
+func cliStyle(on bool) Style {
+	if !on {
+		return Style{}
 	}
-
-	// Per-cell colours from the config schema will need the column widths
-	// computed here rather than by tabwriter; the header is a single span, so
-	// it can still be wrapped after the fact.
-	head, rest, _ := strings.Cut(buf.String(), "\n")
-	if _, err := fmt.Fprintf(w, "\x1b[1m%s\x1b[0m\n", head); err != nil {
-		return err
+	return Style{
+		Header: func(s string) string { return ansiBold + s + ansiReset },
+		Cell: func(_ int, e catalog.Emphasis, s string) string {
+			switch e {
+			case catalog.Bad:
+				return ansiRed + s + ansiReset
+			case catalog.Warn:
+				return ansiYellow + s + ansiReset
+			case catalog.Good:
+				return ansiGreen + s + ansiReset
+			default:
+				return s
+			}
+		},
 	}
-	_, err := io.WriteString(w, rest)
-	return err
 }
 
 // styled reports whether w is a terminal we may decorate. Piped output must
