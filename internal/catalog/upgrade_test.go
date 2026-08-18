@@ -165,7 +165,9 @@ func TestCreatedSuspensionResolvesTimes(t *testing.T) {
 	var sent struct {
 		Spec struct{ Start, End string } `json:"spec"`
 	}
-	json.Unmarshal([]byte(stdin), &sent)
+	if err := json.Unmarshal([]byte(stdin), &sent); err != nil {
+		t.Fatal(err)
+	}
 
 	start, err := time.Parse(time.RFC3339, sent.Spec.Start)
 	if err != nil {
@@ -273,7 +275,9 @@ func TestDeleteSendsTheShownSuspensions(t *testing.T) {
 		Kind  string `json:"kind"`
 		Items []any  `json:"items"`
 	}
-	json.Unmarshal([]byte(stdin), &sent)
+	if err := json.Unmarshal([]byte(stdin), &sent); err != nil {
+		t.Fatal(err)
+	}
 	if sent.Kind != "List" || len(sent.Items) != 3 {
 		t.Errorf("sent %s with %d items", sent.Kind, len(sent.Items))
 	}

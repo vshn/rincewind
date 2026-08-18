@@ -306,7 +306,9 @@ func TestPendingBeatsBehind(t *testing.T) {
 	  "machineconfiguration.openshift.io/currentConfig":"rendered-old",
 	  "machineconfiguration.openshift.io/desiredConfig":"rendered-new",
 	  "machineconfiguration.openshift.io/state":"Done"}}}`
-	json.Unmarshal([]byte(doc), &n)
+	if err := json.Unmarshal([]byte(doc), &n); err != nil {
+		t.Fatal(err)
+	}
 
 	if got := n.configState("rendered-new"); got != "pending" {
 		t.Errorf("state = %q, want pending", got)
@@ -338,8 +340,10 @@ func TestNodeConfigNamesThePoolAndItsTarget(t *testing.T) {
 // custom pool takes precedence over the worker pool it is carved out of.
 func TestPoolForPrefersTheMostSpecificSelector(t *testing.T) {
 	var n node
-	json.Unmarshal([]byte(`{"metadata":{"name":"x","labels":{
-	  "node-role.kubernetes.io/worker":"","node-role.kubernetes.io/storage":""}}}`), &n)
+	if err := json.Unmarshal([]byte(`{"metadata":{"name":"x","labels":{
+	  "node-role.kubernetes.io/worker":"","node-role.kubernetes.io/storage":""}}}`), &n); err != nil {
+		t.Fatal(err)
+	}
 
 	mk := func(name string, labels map[string]string, target string) machineConfigPool {
 		var p machineConfigPool
@@ -441,13 +445,17 @@ func TestPoolSelectorBecomesANodeQuery(t *testing.T) {
 // Listing the wrong nodes would be worse than saying no.
 func TestPoolSelectorRefusesWhatItCannotRender(t *testing.T) {
 	var expr machineConfigPool
-	json.Unmarshal([]byte(`{"metadata":{"name":"w"},"spec":{"nodeSelector":{"matchExpressions":[{}]}}}`), &expr)
+	if err := json.Unmarshal([]byte(`{"metadata":{"name":"w"},"spec":{"nodeSelector":{"matchExpressions":[{}]}}}`), &expr); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := expr.selector(); err == nil {
 		t.Error("matchExpressions were silently dropped")
 	}
 
 	var none machineConfigPool
-	json.Unmarshal([]byte(`{"metadata":{"name":"w"},"spec":{}}`), &none)
+	if err := json.Unmarshal([]byte(`{"metadata":{"name":"w"},"spec":{}}`), &none); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := none.selector(); err == nil {
 		t.Error("a pool without a selector produced one")
 	}

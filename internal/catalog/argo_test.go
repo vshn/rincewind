@@ -353,7 +353,9 @@ func TestLogsKeepOnlyMatchingLines(t *testing.T) {
 func TestLogsSayWhenNothingMatched(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "kubectl")
-	os.WriteFile(bin, []byte("#!/bin/sh\necho 'x app=other'\n"), 0o755)
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho 'x app=other'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	res, err := argoLogs(context.Background(), kube.Client{Bin: bin}, "missing")
 	if err != nil {

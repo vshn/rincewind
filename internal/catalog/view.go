@@ -233,7 +233,5 @@ func (r *Registry) Merge(other *Registry) {
 	for _, g := range other.Groups() {
 		r.Describe(g, other.GroupShort(g))
 	}
-	for _, v := range other.All() {
-		r.views = append(r.views, v)
-	}
+	r.views = append(r.views, other.All()...)
 }

@@ -216,7 +216,7 @@ func runView(cmd *cobra.Command, v catalog.View, args []string) error {
 			// --yes skips the asking, not the telling. A warning such as
 			// "root is not in this set" is the reason to show it at all.
 			if yes {
-				fmt.Fprintf(cmd.ErrOrStderr(), "\n%s\n", prompt)
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "\n%s\n", prompt)
 			} else {
 				ok, err := confirm(cmd, prompt)
 				if err != nil {
@@ -270,7 +270,7 @@ func confirm(cmd *cobra.Command, prompt string) (bool, error) {
 		return false, errors.New("not a terminal; pass --yes to confirm")
 	}
 
-	fmt.Fprintf(cmd.ErrOrStderr(), "\n%s [y/N] ", prompt)
+	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "\n%s [y/N] ", prompt)
 
 	line, err := bufio.NewReader(in).ReadString('\n')
 	if err != nil {

@@ -149,7 +149,9 @@ func TestPoolPauseSendsTheShownPools(t *testing.T) {
 			Metadata struct{ Name string } `json:"metadata"`
 		} `json:"items"`
 	}
-	json.Unmarshal([]byte(stdin), &sent)
+	if err := json.Unmarshal([]byte(stdin), &sent); err != nil {
+		t.Fatal(err)
+	}
 	if len(sent.Items) != 3 {
 		t.Errorf("sent %d pools", len(sent.Items))
 	}
@@ -159,10 +161,14 @@ func TestPoolPauseAndUnpauseDifferOnlyInTheValue(t *testing.T) {
 	c, read := fakeMCO(t)
 	res, _ := machineConfigPools(context.Background(), c, "")
 
-	poolPauseAction(c, true).Run(context.Background(), res, nil)
+	if _, err := poolPauseAction(c, true).Run(context.Background(), res, nil); err != nil {
+		t.Fatal(err)
+	}
 	pauseArgs, _ := read()
 
-	poolPauseAction(c, false).Run(context.Background(), res, nil)
+	if _, err := poolPauseAction(c, false).Run(context.Background(), res, nil); err != nil {
+		t.Fatal(err)
+	}
 	unpauseArgs, _ := read()
 
 	if !strings.Contains(pauseArgs, `"paused":true`) {
@@ -228,12 +234,16 @@ func TestLogsReadTheControllerDeployment(t *testing.T) {
 func TestClusterScopedViewsUseNoNamespace(t *testing.T) {
 	c, read := fakeMCO(t)
 
-	machineConfigPools(context.Background(), c, "")
+	if _, err := machineConfigPools(context.Background(), c, ""); err != nil {
+		t.Fatal(err)
+	}
 	if args, _ := read(); strings.Contains(args, "-n ") {
 		t.Errorf("machineconfigpool was scoped to a namespace: %q", args)
 	}
 
-	clusterVersion(context.Background(), c)
+	if _, err := clusterVersion(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
 	if args, _ := read(); strings.Contains(args, "-n ") {
 		t.Errorf("clusterversion was scoped to a namespace: %q", args)
 	}
