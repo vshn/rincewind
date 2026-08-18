@@ -19,19 +19,8 @@ func sample() catalog.Table {
 	return t
 }
 
-// Rows wider than the pane wrap, which pushes everything below off screen.
-func TestLinesNeverExceedTheWidth(t *testing.T) {
-	for _, width := range []int{20, 40, 63, 120, 400} {
-		for i, line := range Table(sample(), width, Style{}) {
-			if got := lipgloss.Width(line); got > width {
-				t.Errorf("width=%d line %d is %d wide", width, i, got)
-			}
-		}
-	}
-}
-
 func TestColumnsStayAlignedAcrossRows(t *testing.T) {
-	lines := Table(sample(), 100, Style{})
+	lines := Table(sample(), Style{})
 
 	col := strings.Index(lines[0], "SYNC")
 	for i, line := range lines[1:] {
@@ -41,26 +30,11 @@ func TestColumnsStayAlignedAcrossRows(t *testing.T) {
 	}
 }
 
-func TestCrampedColumnsStayUsable(t *testing.T) {
-	for _, line := range Table(sample(), 10, Style{}) {
-		if strings.TrimSpace(line) == "" {
-			t.Error("a cramped table produced an empty line")
-		}
-	}
-}
-
-func TestClippedCellsAreMarked(t *testing.T) {
-	lines := Table(sample(), 40, Style{})
-	if !strings.Contains(lines[1], ellipsis) {
-		t.Errorf("no clip marker: %q", lines[1])
-	}
-}
-
 // Styling happens after the layout, so escape sequences must not shift
 // anything. This is what tabwriter and bubbles/table both get wrong.
 func TestStylingDoesNotDisturbAlignment(t *testing.T) {
-	plain := Table(sample(), 100, Style{})
-	styled := Table(sample(), 100, Style{
+	plain := Table(sample(), Style{})
+	styled := Table(sample(), Style{
 		Header: func(s string) string { return "\x1b[1m" + s + "\x1b[0m" },
 		Cell:   func(_ int, _ catalog.Emphasis, s string) string { return "\x1b[31m" + s + "\x1b[0m" },
 	})
@@ -77,7 +51,7 @@ func TestStylingDoesNotDisturbAlignment(t *testing.T) {
 
 func TestEmphasisIsLookedUpPerCell(t *testing.T) {
 	var seen []catalog.Emphasis
-	Table(sample(), 100, Style{
+	Table(sample(), Style{
 		Cell: func(_ int, e catalog.Emphasis, s string) string {
 			seen = append(seen, e)
 			return s

@@ -51,6 +51,7 @@ func buildRegistry() *catalog.Registry {
 
 	reg := catalog.NewRegistry()
 	reg.Merge(catalog.Argo(client))
+	reg.Merge(catalog.Upgrade(client))
 	return reg
 }
 
@@ -98,6 +99,20 @@ func viewCmd(v catalog.View) *cobra.Command {
 	if len(v.Actions) > 0 {
 		cmd.Flags().String(flagAction, "", "run an action on this view: "+strings.Join(v.ActionNames(), ", "))
 		cmd.Flags().BoolP(flagYes, "y", false, "skip the confirmation prompt")
+
+		// An action's own parameters become flags. Two actions of one view
+		// must not claim the same name; pflag would panic, so say what is
+		// wrong instead.
+		claimed := map[string]string{}
+		for _, a := range v.Actions {
+			for _, p := range a.Params {
+				if owner, taken := claimed[p.Name]; taken {
+					panic(fmt.Sprintf("%s: actions %q and %q both define --%s", v.ID(), owner, a.Name, p.Name))
+				}
+				claimed[p.Name] = a.Name
+				cmd.Flags().String(p.Name, p.Default, fmt.Sprintf("%s (--action %s)", p.Short, a.Name))
+			}
+		}
 
 		// Completion for the flag's values, so actions are as discoverable on
 		// the command line as they are in the TUI.
@@ -169,6 +184,20 @@ func runView(cmd *cobra.Command, v catalog.View, args []string) error {
 			name, v.ID(), strings.Join(v.ActionNames(), ", "))
 	}
 
+	// The action's own parameters win over the view's: they are the more
+	// specific answer to the same name.
+	values := map[string]string{}
+	for _, p := range action.Params {
+		values[p.Name], _ = cmd.Flags().GetString(p.Name)
+	}
+	extra, err := action.Bind(values)
+	if err != nil {
+		return err
+	}
+	for k, val := range extra {
+		bound[k] = val
+	}
+
 	// The view's output is the action's input, so print it first: you see what
 	// you are about to act on before you are asked to confirm.
 	if err := render.CLI(cmd.OutOrStdout(), res); err != nil {
@@ -177,7 +206,7 @@ func runView(cmd *cobra.Command, v catalog.View, args []string) error {
 
 	yes, _ := cmd.Flags().GetBool(flagYes)
 	if action.Confirm != nil {
-		if prompt := action.Confirm(res); prompt != "" {
+		if prompt := action.Confirm(res, bound); prompt != "" {
 			// Fetched here rather than at startup: it costs a subprocess, and
 			// only a mutation is worth spending it on.
 			cluster, _ := kube.Client{}.CurrentContext(cmd.Context())

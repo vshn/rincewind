@@ -76,7 +76,7 @@ func TestConfirmedActionWaitsForY(t *testing.T) {
 	ran := false
 	reg, _ := withAction(catalog.Action{
 		Name: "pause", Key: "p",
-		Confirm: func(catalog.Result) string { return "Pause 1 application?" },
+		Confirm: func(catalog.Result, catalog.Args) string { return "Pause 1 application?" },
 		Run: func(context.Context, catalog.Result, catalog.Args) (catalog.Result, error) {
 			ran = true
 			return nil, nil
@@ -108,7 +108,7 @@ func TestAnyOtherKeyCancelsTheConfirmation(t *testing.T) {
 	ran := false
 	reg, _ := withAction(catalog.Action{
 		Name: "pause", Key: "p",
-		Confirm: func(catalog.Result) string { return "Pause?" },
+		Confirm: func(catalog.Result, catalog.Args) string { return "Pause?" },
 		Run: func(context.Context, catalog.Result, catalog.Args) (catalog.Result, error) {
 			ran = true
 			return nil, nil
@@ -135,7 +135,7 @@ func TestAnyOtherKeyCancelsTheConfirmation(t *testing.T) {
 func TestConfirmationSwallowsNavigation(t *testing.T) {
 	reg, _ := withAction(catalog.Action{
 		Name: "pause", Key: "p",
-		Confirm: func(catalog.Result) string { return "Pause?" },
+		Confirm: func(catalog.Result, catalog.Args) string { return "Pause?" },
 	})
 
 	m := run(t, reg)
@@ -203,5 +203,161 @@ func TestRequiredParamStopsTheRun(t *testing.T) {
 	}
 	if !strings.Contains(visibleOnly(m.View().Content), "requires APP") {
 		t.Errorf("no explanation shown: %q", visibleOnly(m.View().Content))
+	}
+}
+
+// An action with parameters collects them before asking, one field at a time.
+func TestActionParametersAreCollectedInOrder(t *testing.T) {
+	var got catalog.Args
+	reg, _ := withAction(catalog.Action{
+		Name: "create", Key: "n",
+		Params: []catalog.Param{
+			{Name: "name", Required: true},
+			{Name: "reason", Required: true},
+		},
+		Run: func(_ context.Context, _ catalog.Result, args catalog.Args) (catalog.Result, error) {
+			got = args
+			return nil, nil
+		},
+	})
+
+	m := run(t, reg)
+	m.Update(key("n"))
+
+	if m.asking == nil {
+		t.Fatal("no prompt started")
+	}
+	if !strings.Contains(visibleOnly(m.View().Content), "name") {
+		t.Error("the field being asked for is not shown")
+	}
+
+	for _, r := range "win" {
+		m.Update(key(string(r)))
+	}
+	m.Update(key("enter"))
+
+	if m.askIdx != 1 {
+		t.Fatalf("still on field %d", m.askIdx)
+	}
+	// The answered field stays visible, which is the only chance to spot a typo.
+	if !strings.Contains(visibleOnly(m.View().Content), "win") {
+		t.Error("the answer given so far is not shown")
+	}
+
+	for _, r := range "because" {
+		m.Update(key(string(r)))
+	}
+	_, cmd := m.Update(key("enter"))
+	if cmd == nil {
+		t.Fatal("the action did not fire after the last field")
+	}
+	cmd()
+
+	if got.Get("name") != "win" || got.Get("reason") != "because" {
+		t.Errorf("action received %v", got)
+	}
+}
+
+// Everything typed is part of the answer, including keys that are bindings.
+func TestPromptOwnsTheKeyboard(t *testing.T) {
+	ran := false
+	reg, _ := withAction(catalog.Action{
+		Name: "create", Key: "n",
+		Params: []catalog.Param{{Name: "name", Required: true}},
+		Run: func(context.Context, catalog.Result, catalog.Args) (catalog.Result, error) {
+			ran = true
+			return nil, nil
+		},
+	})
+
+	m := run(t, reg)
+	m.Update(key("n"))
+	for _, r := range "qn/" {
+		m.Update(key(string(r)))
+	}
+
+	if ran {
+		t.Error("the action ran mid-answer")
+	}
+	if m.asking == nil {
+		t.Fatal("the prompt was closed by a stray key")
+	}
+	if got := m.input.Value(); got != "qn/" {
+		t.Errorf("input holds %q; a binding swallowed a character", got)
+	}
+}
+
+func TestEscapeAbandonsThePrompt(t *testing.T) {
+	ran := false
+	reg, _ := withAction(catalog.Action{
+		Name: "create", Key: "n",
+		Params: []catalog.Param{{Name: "name", Required: true}},
+		Run: func(context.Context, catalog.Result, catalog.Args) (catalog.Result, error) {
+			ran = true
+			return nil, nil
+		},
+	})
+
+	m := run(t, reg)
+	m.Update(key("n"))
+	m.Update(key("x"))
+	m.Update(key("esc"))
+
+	if m.asking != nil {
+		t.Error("the prompt is still open")
+	}
+	if ran {
+		t.Error("the action ran after being abandoned")
+	}
+	if m.input.Value() != "" {
+		t.Error("the abandoned answer was kept")
+	}
+}
+
+// A required field left empty must not reach the action.
+func TestEmptyRequiredParameterIsRefused(t *testing.T) {
+	ran := false
+	reg, _ := withAction(catalog.Action{
+		Name: "create", Key: "n",
+		Params: []catalog.Param{{Name: "name", Required: true}},
+		Run: func(context.Context, catalog.Result, catalog.Args) (catalog.Result, error) {
+			ran = true
+			return nil, nil
+		},
+	})
+
+	m := run(t, reg)
+	m.Update(key("n"))
+	if _, cmd := m.Update(key("enter")); cmd != nil {
+		cmd()
+	}
+
+	if ran {
+		t.Error("the action ran without its parameter")
+	}
+	if !strings.Contains(visibleOnly(m.View().Content), "requires NAME") {
+		t.Errorf("no explanation shown: %q", visibleOnly(m.View().Content))
+	}
+}
+
+// The confirmation has to describe the collected values, not the rows.
+func TestConfirmationSeesTheCollectedParameters(t *testing.T) {
+	reg, _ := withAction(catalog.Action{
+		Name: "create", Key: "n",
+		Params: []catalog.Param{{Name: "name", Required: true}},
+		Confirm: func(_ catalog.Result, args catalog.Args) string {
+			return "Create " + args.Get("name") + "?"
+		},
+	})
+
+	m := run(t, reg)
+	m.Update(key("n"))
+	for _, r := range "win" {
+		m.Update(key(string(r)))
+	}
+	m.Update(key("enter"))
+
+	if !strings.Contains(visibleOnly(m.View().Content), "Create win?") {
+		t.Errorf("confirmation does not name the value: %q", visibleOnly(m.View().Content))
 	}
 }

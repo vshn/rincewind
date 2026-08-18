@@ -215,7 +215,7 @@ func TestConfirmNamesTheCountAndSaysWhenRootComesAlong(t *testing.T) {
 	ctx := context.Background()
 
 	all, _ := argoApps(ctx, c, "")
-	if got := pauseAction(c).Confirm(all); !strings.Contains(got, "3 applications") {
+	if got := pauseAction(c).Confirm(all, nil); !strings.Contains(got, "3 applications") {
 		t.Errorf("confirm does not name the count: %q", got)
 	} else if strings.Contains(got, "app-of-apps") {
 		t.Errorf("warned about root although it is in the set: %q", got)
@@ -224,7 +224,7 @@ func TestConfirmNamesTheCountAndSaysWhenRootComesAlong(t *testing.T) {
 	// Narrowed to one app, root is patched alongside it and the prompt has to
 	// say so. See docs/views.md.
 	narrowed := Table{Cols: all.(Table).Cols, Rows: all.(Table).Rows[:1]}
-	if got := pauseAction(c).Confirm(narrowed); !strings.Contains(got, "app-of-apps") {
+	if got := pauseAction(c).Confirm(narrowed, nil); !strings.Contains(got, "app-of-apps") {
 		t.Errorf("prompt does not mention root on a narrowed set: %q", got)
 	}
 }
@@ -250,7 +250,7 @@ func TestPauseAlwaysIncludesRoot(t *testing.T) {
 	}
 
 	act := pauseAction(c)
-	if got := act.Confirm(one); !strings.Contains(got, rootApp) {
+	if got := act.Confirm(one, nil); !strings.Contains(got, rootApp) {
 		t.Errorf("confirmation does not mention root: %q", got)
 	}
 
@@ -271,7 +271,7 @@ func TestUnpauseLeavesRootAlone(t *testing.T) {
 	one, _ := argoApps(ctx, c, "cluster-tools")
 
 	act := unpauseAction(c)
-	if got := act.Confirm(one); !strings.Contains(got, "stays paused") {
+	if got := act.Confirm(one, nil); !strings.Contains(got, "stays paused") {
 		t.Errorf("confirmation does not warn that root stays paused: %q", got)
 	}
 

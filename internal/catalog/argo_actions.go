@@ -84,7 +84,7 @@ func pauseAction(c kube.Client) Action {
 		Scope:   Rows,
 		Short:   "Pause auto-sync on the listed applications",
 		Refresh: true,
-		Confirm: func(in Result) string {
+		Confirm: func(in Result, _ Args) string {
 			names := appNamesIn(in)
 			if hasRoot(names) {
 				return fmt.Sprintf("Pause auto-sync on %s?", describeApps(names))
@@ -104,7 +104,7 @@ func unpauseAction(c kube.Client) Action {
 		Scope:   Rows,
 		Short:   "Restore auto-sync on the listed applications",
 		Refresh: true,
-		Confirm: func(in Result) string {
+		Confirm: func(in Result, _ Args) string {
 			// Says "set", not "restore": the previous value is not recorded
 			// anywhere, so this writes the default. See docs/views.md.
 			msg := fmt.Sprintf("Set auto-sync (prune, selfHeal) on %s?", describeApps(appNamesIn(in)))
@@ -130,7 +130,7 @@ func refreshRowsAction(c kube.Client) Action {
 		Scope:   Rows,
 		Refresh: true,
 		Run: func(ctx context.Context, in Result, _ Args) (Result, error) {
-			return runOnApps(ctx, c, in, func(list []byte) ([]byte, error) {
+			return runOnRows(ctx, in, func(list []byte) ([]byte, error) {
 				return c.Input(ctx, list, "annotate", "-f", "-", refreshAnnotation, "--overwrite")
 			})
 		},
@@ -167,9 +167,7 @@ func refreshAppAction(c kube.Client) Action {
 // exactly the set on screen — no selector that might match something else.
 func patchApps(c kube.Client, patch string, also ...string) func(context.Context, Result, Args) (Result, error) {
 	return func(ctx context.Context, in Result, _ Args) (Result, error) {
-		out, err := runOnApps(ctx, c, in, func(list []byte) ([]byte, error) {
-			return c.Input(ctx, list, "patch", "-f", "-", "--type", "merge", "-p", patch)
-		})
+		out, err := patchRows(ctx, c, in, patch)
 		if err != nil {
 			return nil, err
 		}
@@ -189,30 +187,6 @@ func patchApps(c kube.Client, patch string, also ...string) func(context.Context
 		}
 		return Text{Lines: lines}, nil
 	}
-}
-
-func runOnApps(ctx context.Context, c kube.Client, in Result, run func(list []byte) ([]byte, error)) (Result, error) {
-	t, ok := in.(Table)
-	if !ok {
-		return nil, fmt.Errorf("this action needs a table, got %T", in)
-	}
-
-	sources := t.Sources()
-	if len(sources) == 0 {
-		return nil, fmt.Errorf("nothing to act on")
-	}
-
-	list, err := kube.ListOf(sources)
-	if err != nil {
-		return nil, err
-	}
-
-	out, err := run(list)
-	if err != nil {
-		return nil, err
-	}
-
-	return Text{Lines: splitLines(string(out))}, nil
 }
 
 // appNamesIn reads the names back out of the rows the view produced.

@@ -48,9 +48,7 @@ func cli(w io.Writer, res catalog.Result, style bool) error {
 }
 
 func writeTable(w io.Writer, t catalog.Table, style bool) error {
-	// Unbounded: a pipe has no width, and a terminal wraps on its own rather
-	// than losing a column silently.
-	for _, line := range Table(t, 0, cliStyle(style)) {
+	for _, line := range Table(t, cliStyle(style)) {
 		if _, err := fmt.Fprintln(w, line); err != nil {
 			return err
 		}

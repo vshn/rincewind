@@ -8,11 +8,8 @@ import (
 	"github.com/vshn/aldediggi/internal/catalog"
 )
 
-const (
-	gutter      = 2 // spaces between columns
-	minColWidth = 3 // a shrunken column still has to show something
-	ellipsis    = "…"
-)
+// gutter is the space between columns.
+const gutter = 2
 
 // Style paints a table. Either field may be nil, which leaves that part
 // unstyled. Styling happens after the layout is fixed, because escape
@@ -27,43 +24,37 @@ type Style struct {
 	Cell func(row int, e catalog.Emphasis, s string) string
 }
 
-// Table lays a table out as lines no wider than width, header first. One
-// renderer for both modes, so the CLI and the TUI cannot disagree about where
-// a column ends.
-func Table(t catalog.Table, width int, style Style) []string {
-	widths := layout(t, width)
+// Table lays a table out as lines, header first. Columns are as wide as their
+// widest cell and nothing is cut: a diagnostic tool that hides the end of a
+// message is worse than one you have to scroll. The terminal wraps, and the TUI
+// scrolls sideways.
+//
+// One renderer for both modes, so the CLI and the TUI cannot disagree about
+// where a column ends.
+func Table(t catalog.Table, style Style) []string {
+	widths := layout(t)
 
 	out := make([]string, 0, len(t.Rows)+1)
-	out = append(out, clipLine(join(t.Cols, widths, func(_ int, cell string) string {
+	out = append(out, join(t.Cols, widths, func(_ int, cell string) string {
 		if style.Header == nil {
 			return cell
 		}
 		return style.Header(cell)
-	}), width))
+	}))
 
 	for i, row := range t.Rows {
-		out = append(out, clipLine(join(row.Cells, widths, func(_ int, cell string) string {
+		out = append(out, join(row.Cells, widths, func(_ int, cell string) string {
 			if style.Cell == nil {
 				return cell
 			}
 			return style.Cell(i, t.EmphasisOf(strings.TrimSpace(cell)), cell)
-		}), width))
+		}))
 	}
 	return out
 }
 
-// clipLine is the backstop for a window too narrow to hold even the minimum
-// columns. width <= 0 means unbounded, which is what a pipe gets.
-func clipLine(line string, width int) string {
-	if width <= 0 || lipgloss.Width(line) <= width {
-		return line
-	}
-	return lipgloss.NewStyle().MaxWidth(width).Render(line)
-}
-
-// layout sizes each column to its widest cell, then takes any overflow off the
-// last one, which is the free-text column.
-func layout(t catalog.Table, width int) []int {
+// layout sizes each column to its widest cell.
+func layout(t catalog.Table) []int {
 	widths := make([]int, len(t.Cols))
 	for i, c := range t.Cols {
 		widths[i] = lipgloss.Width(c)
@@ -75,42 +66,6 @@ func layout(t catalog.Table, width int) []int {
 			}
 		}
 	}
-
-	if len(widths) == 0 || width <= 0 {
-		return widths
-	}
-
-	total := gutter * (len(widths) - 1)
-	for _, w := range widths {
-		total += w
-	}
-
-	// The last column is the free-text one by convention, so it gives way
-	// first. Once it is at the minimum, keep taking from whichever column is
-	// widest, otherwise a narrow window overflows however much the last one
-	// shrinks.
-	shrink := func(i int) {
-		give := min(widths[i]-minColWidth, total-width)
-		widths[i] -= give
-		total -= give
-	}
-
-	if last := len(widths) - 1; total > width && widths[last] > minColWidth {
-		shrink(last)
-	}
-	for total > width {
-		widest := -1
-		for i, w := range widths {
-			if w > minColWidth && (widest < 0 || w > widths[widest]) {
-				widest = i
-			}
-		}
-		if widest < 0 {
-			break // every column is at the minimum; the line gets clipped
-		}
-		shrink(widest)
-	}
-
 	return widths
 }
 
@@ -121,8 +76,6 @@ func join(cells []string, widths []int, paint func(i int, cell string) string) s
 		if i < len(cells) {
 			cell = cells[i]
 		}
-		cell = clip(cell, w)
-
 		// Padding goes outside the paint. Inside it, trailing spaces would be
 		// wrapped in escape sequences and no longer trimmable, so a styled
 		// line would measure differently from the same line unstyled.
@@ -140,20 +93,4 @@ func join(cells []string, widths []int, paint func(i int, cell string) string) s
 		}
 	}
 	return strings.TrimRight(b.String(), " ")
-}
-
-// clip shortens a cell to w columns, marking that something was cut.
-func clip(s string, w int) string {
-	if lipgloss.Width(s) <= w {
-		return s
-	}
-	if w <= 1 {
-		return ellipsis
-	}
-
-	runes := []rune(s)
-	for len(runes) > 0 && lipgloss.Width(string(runes))+1 > w {
-		runes = runes[:len(runes)-1]
-	}
-	return string(runes) + ellipsis
 }

@@ -125,9 +125,18 @@ type model struct {
 	// cancel stops the run in flight, on escape or on quit.
 	cancel context.CancelFunc
 
-	// pending holds an action waiting for the user to answer its confirmation.
-	pending *catalog.Action
-	prompt  string
+	// pending holds an action waiting for the user to answer its confirmation,
+	// together with the parameters it will run with.
+	pending     *catalog.Action
+	pendingArgs catalog.Args
+	prompt      string
+
+	// asking collects an action's own parameters, one field at a time. A form
+	// would be friendlier; this is enough to create something.
+	asking    *catalog.Action
+	askIdx    int
+	askValues map[string]string
+	input     textinput.Model
 
 	// filter narrows what is shown — and therefore what an action operates
 	// on, which is the whole point of not having row selection.
@@ -159,6 +168,11 @@ func newModel(reg *catalog.Registry) *model {
 	}
 	m.filter = textinput.New()
 	m.filter.Prompt = "/"
+	m.input = textinput.New()
+
+	// Long lines are not wrapped, so they can be scrolled instead. Wrapping a
+	// table row would make the columns meaningless.
+	m.vp.SoftWrap = false
 
 	for _, group := range reg.Groups() {
 		listed := reg.Listed(group)
@@ -321,16 +335,31 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
+	// Collecting a value owns the keyboard: everything typed is part of the
+	// answer, including keys that are otherwise bindings.
+	if m.asking != nil {
+		switch key {
+		case "enter":
+			return m, m.answer()
+		case "esc":
+			m.cancelAsking()
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+	}
+
 	// A pending confirmation swallows every key, so that a stray j or p cannot
 	// answer a question about deleting things.
 	if m.pending != nil {
 		switch key {
 		case "y", "Y":
-			act := *m.pending
-			m.pending, m.prompt = nil, ""
-			return m, m.runAction(act)
+			act, args := *m.pending, m.pendingArgs
+			m.pending, m.pendingArgs, m.prompt = nil, nil, ""
+			return m, m.runAction(act, args)
 		default:
-			m.pending, m.prompt = nil, ""
+			m.pending, m.pendingArgs, m.prompt = nil, nil, ""
 			return m, nil
 		}
 	}
@@ -370,6 +399,17 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "tab":
 		return m, m.toggleFocus()
+
+	case "<", ">":
+		// Columns are never cut, so anything past the right edge is reached by
+		// scrolling rather than lost.
+		step := m.contentWidth() / 3
+		if key == "<" {
+			m.vp.ScrollLeft(step)
+		} else {
+			m.vp.ScrollRight(step)
+		}
+		return m, nil
 
 	case "esc":
 		switch {
@@ -421,7 +461,7 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // quit are matched first above, so config can never claim them.
 func (m *model) actionFor(key string) (catalog.Action, bool) {
 	cur := m.selected()
-	if cur == nil || m.res == nil || m.running || m.filtering {
+	if cur == nil || m.res == nil || m.running || m.filtering || m.asking != nil {
 		return catalog.Action{}, false
 	}
 	for _, a := range cur.Actions {
@@ -485,20 +525,68 @@ func (m *model) navigate(to catalog.Navigate) tea.Cmd {
 	return m.runCurrent(to.Args)
 }
 
-// arm either asks first or runs straight away.
+// arm collects whatever the action still needs, then asks, then runs.
 func (m *model) arm(act catalog.Action) tea.Cmd {
+	if len(act.Params) > 0 {
+		m.asking, m.askIdx, m.askValues = &act, 0, map[string]string{}
+		m.input.Reset()
+		return m.input.Focus()
+	}
+	return m.confirmOrRun(act, m.args)
+}
+
+func (m *model) confirmOrRun(act catalog.Action, args catalog.Args) tea.Cmd {
 	if act.Confirm != nil {
-		if prompt := act.Confirm(m.target()); prompt != "" {
-			m.pending, m.prompt = &act, prompt
+		if prompt := act.Confirm(m.target(), args); prompt != "" {
+			m.pending, m.pendingArgs, m.prompt = &act, args, prompt
 			return nil
 		}
 	}
-	return m.runAction(act)
+	return m.runAction(act, args)
+}
+
+// answer records the current field and moves on, or finishes the collection.
+func (m *model) answer() tea.Cmd {
+	act := *m.asking
+	param := act.Params[m.askIdx]
+	m.askValues[param.Name] = m.input.Value()
+
+	if m.askIdx+1 < len(act.Params) {
+		m.askIdx++
+		m.input.Reset()
+		return nil
+	}
+
+	values := m.askValues
+	m.cancelAsking()
+
+	// The action's own parameters win over the view's: they are the more
+	// specific answer to the same name.
+	args := catalog.Args{}
+	for k, v := range m.args {
+		args[k] = v
+	}
+	bound, err := act.Bind(values)
+	if err != nil {
+		m.err = err
+		return nil
+	}
+	for k, v := range bound {
+		args[k] = v
+	}
+
+	return m.confirmOrRun(act, args)
+}
+
+func (m *model) cancelAsking() {
+	m.asking, m.askIdx, m.askValues = nil, 0, nil
+	m.input.Blur()
+	m.input.Reset()
 }
 
 // runAction runs the action against the result currently on screen, then
 // re-runs the view if the action changed anything.
-func (m *model) runAction(act catalog.Action) tea.Cmd {
+func (m *model) runAction(act catalog.Action, args catalog.Args) tea.Cmd {
 	cur := m.selected()
 	if cur == nil || m.res == nil {
 		return nil
@@ -511,7 +599,7 @@ func (m *model) runAction(act catalog.Action) tea.Cmd {
 	ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
 	m.cancel = cancel
 
-	seq, in, args := m.seq, m.target(), m.args
+	seq, in := m.seq, m.target()
 	run := func() tea.Msg {
 		defer cancel()
 
@@ -621,6 +709,9 @@ func (m *model) actionBarLines() int {
 	if len(m.actions()) == 0 {
 		return 0
 	}
+	if m.asking != nil {
+		return 1 + lipgloss.Height(m.askBlock())
+	}
 	if m.pending != nil {
 		return 1 + lipgloss.Height(m.promptBlock()) // divider plus the question
 	}
@@ -662,16 +753,48 @@ func mustCount(res catalog.Result) int {
 	return n
 }
 
+// askBlock shows which field is being collected, how far along it is, and what
+// has been answered so far.
+func (m *model) askBlock() string {
+	act := *m.asking
+	param := act.Params[m.askIdx]
+
+	head := promptStyle.Render(fmt.Sprintf("%s (%d/%d)", act.Name, m.askIdx+1, len(act.Params)))
+	if param.Short != "" {
+		head += dividerStyle.Render("  " + param.Short)
+	}
+
+	lines := []string{head}
+
+	// Answered fields stay visible: by the fourth one you have forgotten the
+	// first, and this is the only chance to notice a typo before confirming.
+	for _, done := range act.Params[:m.askIdx] {
+		lines = append(lines, dividerStyle.Render("  "+done.Name+": ")+m.askValues[done.Name])
+	}
+
+	m.input.Prompt = param.Name + ": "
+	lines = append(lines, "  "+m.input.View())
+
+	return lipgloss.NewStyle().Width(m.contentWidth()).Render(
+		lipgloss.JoinVertical(lipgloss.Left, lines...))
+}
+
 // promptBlock wraps the question and puts the cluster on its own line.
 func (m *model) promptBlock() string {
 	wrap := lipgloss.NewStyle().Width(m.contentWidth())
 
-	block := wrap.Render(promptStyle.Render(m.prompt + " [y/N]"))
+	// The answer goes on the last line, not appended to the question: a
+	// multi-line prompt would otherwise bury it mid-paragraph.
+	last := promptStyle.Render("[y/N]")
 	if m.cluster != "" {
-		block = lipgloss.JoinVertical(lipgloss.Left, block,
-			dividerStyle.Render("cluster: ")+clusterStyle.Render(m.cluster))
+		last = dividerStyle.Render("cluster: ") + clusterStyle.Render(m.cluster) +
+			dividerStyle.Render("   ") + last
 	}
-	return block
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		wrap.Render(promptStyle.Render(m.prompt)),
+		last,
+	)
 }
 
 func (m *model) actions() []catalog.Action {
@@ -738,7 +861,7 @@ func (m *model) showResult() {
 			m.row = min(max(m.row, 0), len(r.Rows)-1)
 			selected = m.row
 		}
-		m.vp.SetContentLines(render.Table(r, m.contentWidth(), tableStyle(selected)))
+		m.vp.SetContentLines(render.Table(r, tableStyle(selected)))
 	}
 }
 
@@ -857,6 +980,31 @@ func (m *model) argLabel() string {
 	return strings.Join(vals, " ")
 }
 
+// scrollable reports whether anything reaches past the right edge, so the help
+// only offers the keys that would do something.
+func (m *model) scrollable() bool {
+	if m.vp.XOffset() > 0 {
+		return true
+	}
+	for _, line := range m.paneLines() {
+		if lipgloss.Width(line) > m.contentWidth() {
+			return true
+		}
+	}
+	return false
+}
+
+// paneLines is what the output pane currently holds.
+func (m *model) paneLines() []string {
+	switch r := m.visible().(type) {
+	case catalog.Text:
+		return r.Lines
+	case catalog.Table:
+		return render.Table(r, render.Style{})
+	}
+	return nil
+}
+
 func (m *model) clusterLabel() string {
 	if m.cluster == "" {
 		return ""
@@ -917,6 +1065,14 @@ func (m *model) pane() string {
 		return helpStyle.Render("press ⏎ to run")
 	}
 
+	// A table of nothing but headers reads like a failure. Say which it is.
+	if n, ok := shownCount(m.visible()); ok && n == 0 {
+		if m.filter.Value() != "" {
+			return helpStyle.Render("nothing matches " + m.filter.Value())
+		}
+		return helpStyle.Render("nothing to show")
+	}
+
 	return m.vp.View()
 }
 
@@ -930,6 +1086,9 @@ func (m *model) actionBar() string {
 
 	divider := dividerStyle.Render(strings.Repeat("─", max(m.contentWidth(), 1)))
 
+	if m.asking != nil {
+		return lipgloss.JoinVertical(lipgloss.Left, divider, m.askBlock())
+	}
 	if m.pending != nil {
 		return lipgloss.JoinVertical(lipgloss.Left, divider, m.promptBlock())
 	}
@@ -975,6 +1134,8 @@ func visibleOnly(s string) string {
 
 func (m *model) help() string {
 	switch {
+	case m.asking != nil:
+		return helpStyle.Render("⏎ next  ·  esc cancel")
 	case m.pending != nil:
 		return helpStyle.Render("y confirm  ·  any other key cancels")
 	case m.filtering:
@@ -984,6 +1145,9 @@ func (m *model) help() string {
 	}
 
 	keys := []string{"↑↓ move", "⇥ focus", "/ filter", "r reload", "q quit"}
+	if m.scrollable() {
+		keys = append(keys, "<> scroll")
+	}
 	if m.focus == paneList {
 		keys = append([]string{"⏎ run"}, keys...)
 	}

@@ -80,10 +80,15 @@ type Action struct {
 	Key   string
 	Short string
 	Scope Scope
+	// Params are values the action needs that the view cannot supply, such as
+	// the name and dates of something being created. They arrive as flags on
+	// the command line and as prompts in the TUI.
+	Params []Param
 	// Confirm returns the prompt to show before running, or "" to run
-	// unasked. It receives the view's result so the prompt can name the count,
-	// which with no row selection is the only brake there is.
-	Confirm func(in Result) string
+	// unasked. It sees both what the action will act on and the values it was
+	// given, because for a creating action the parameters are the thing worth
+	// reading back.
+	Confirm func(in Result, args Args) string
 	// Refresh re-runs the view afterwards.
 	Refresh bool
 	Run     func(ctx context.Context, in Result, args Args) (Result, error)
@@ -93,18 +98,37 @@ type Action struct {
 // CLI and the TUI go through this, so a required parameter cannot be missing
 // in one mode and silently defaulted in the other.
 func (v View) Bind(positional []string) (Args, error) {
+	return bind(v.Params, v.ID(), func(i int, p Param) string {
+		if i < len(positional) {
+			return positional[i]
+		}
+		return ""
+	})
+}
+
+// bind is the one place a missing required parameter is turned into an error,
+// shared by views and actions so the message reads the same either way.
+func bind(params []Param, owner string, value func(i int, p Param) string) (Args, error) {
 	out := Args{}
-	for i, p := range v.Params {
-		switch {
-		case i < len(positional) && positional[i] != "":
-			out[p.Name] = positional[i]
+	for i, p := range params {
+		switch v := value(i, p); {
+		case v != "":
+			out[p.Name] = v
 		case p.Default != "":
 			out[p.Name] = p.Default
 		case p.Required:
-			return nil, fmt.Errorf("%s requires %s", v.ID(), strings.ToUpper(p.Name))
+			return nil, fmt.Errorf("%s requires %s", owner, strings.ToUpper(p.Name))
 		}
 	}
 	return out, nil
+}
+
+// Bind resolves named values against the action's parameters. The values come
+// from flags or from prompts; both end up in the same map.
+func (a Action) Bind(values map[string]string) (Args, error) {
+	return bind(a.Params, a.Name, func(_ int, p Param) string {
+		return values[p.Name]
+	})
 }
 
 // Lookup finds one of the view's actions by name.
