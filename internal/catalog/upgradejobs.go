@@ -197,8 +197,8 @@ func listJobs(ctx context.Context, c kube.Client, only string) ([]upgradeJob, er
 	return jobs, nil
 }
 
-func upgradeJobs(ctx context.Context, c kube.Client, now time.Time) (Result, error) {
-	jobs, err := listJobs(ctx, c, "")
+func upgradeJobs(ctx context.Context, c kube.Client, only string, now time.Time) (Result, error) {
+	jobs, err := listJobs(ctx, c, only)
 	if err != nil {
 		return nil, err
 	}

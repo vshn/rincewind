@@ -85,9 +85,10 @@ func Upgrade(c kube.Client) *Registry {
 		Short:     "List UpgradeJobs and where each one got to",
 		Kind:      Snapshot,
 		Available: ctrl.Available,
+		Params:    jobParam(false),
 		Actions:   []Action{openConditions(), openHooks()},
-		Run: func(ctx context.Context, _ Args) (Result, error) {
-			return upgradeJobs(ctx, ctrl, time.Now())
+		Run: func(ctx context.Context, args Args) (Result, error) {
+			return upgradeJobs(ctx, ctrl, args.Get("job"), time.Now())
 		},
 	})
 

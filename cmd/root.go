@@ -52,6 +52,7 @@ func buildRegistry() *catalog.Registry {
 	reg := catalog.NewRegistry()
 	reg.Merge(catalog.Argo(client))
 	reg.Merge(catalog.Upgrade(client))
+	reg.Merge(catalog.Nodes(client))
 	return reg
 }
 

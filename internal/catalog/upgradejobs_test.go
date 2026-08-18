@@ -83,7 +83,7 @@ func stateOf(t *testing.T, res Result, name string) (state, message string) {
 // A `Succeeded` condition that says "False" is the opposite of success. The
 // zsh version only looked for a condition's presence.
 func TestJobStateReadsTheConditionStatusNotJustItsType(t *testing.T) {
-	res, err := upgradeJobs(context.Background(), fakeJobs(t), jobsNow)
+	res, err := upgradeJobs(context.Background(), fakeJobs(t), "", jobsNow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestJobStateReadsTheConditionStatusNotJustItsType(t *testing.T) {
 // The zsh version bound to the Started condition, so a job that had not begun
 // produced no output at all — exactly the ones worth seeing before a window.
 func TestJobsWithoutConditionsStillAppear(t *testing.T) {
-	res, err := upgradeJobs(context.Background(), fakeJobs(t), jobsNow)
+	res, err := upgradeJobs(context.Background(), fakeJobs(t), "", jobsNow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestJobsWithoutConditionsStillAppear(t *testing.T) {
 // A job that never started and whose window has closed will never run, which
 // is worth saying rather than leaving it to look merely pending.
 func TestJobPastItsStartWindowIsExpired(t *testing.T) {
-	res, _ := upgradeJobs(context.Background(), fakeJobs(t), jobsNow)
+	res, _ := upgradeJobs(context.Background(), fakeJobs(t), "", jobsNow)
 
 	state, msg := stateOf(t, res, "expired-4-20-30")
 	if state != "Expired" {
@@ -132,7 +132,7 @@ func TestJobPastItsStartWindowIsExpired(t *testing.T) {
 // Upgrade jobs are a calendar. Ordering them by state would move the same job
 // around on every reload and make the dates unscannable.
 func TestJobsSortByScheduleAlone(t *testing.T) {
-	res, _ := upgradeJobs(context.Background(), fakeJobs(t), jobsNow)
+	res, _ := upgradeJobs(context.Background(), fakeJobs(t), "", jobsNow)
 
 	var got []string
 	var last time.Time
@@ -158,7 +158,7 @@ func TestJobsSortByScheduleAlone(t *testing.T) {
 // A hook may appear more than once under different events, so entries are
 // counted rather than names.
 func TestHookCountCountsEntries(t *testing.T) {
-	res, _ := upgradeJobs(context.Background(), fakeJobs(t), jobsNow)
+	res, _ := upgradeJobs(context.Background(), fakeJobs(t), "", jobsNow)
 
 	tbl := res.(Table)
 	for _, r := range tbl.Rows {
@@ -232,7 +232,7 @@ func TestConditionsRejectAMissingJob(t *testing.T) {
 }
 
 func TestDrillDownCarriesTheJob(t *testing.T) {
-	res, _ := upgradeJobs(context.Background(), fakeJobs(t), jobsNow)
+	res, _ := upgradeJobs(context.Background(), fakeJobs(t), "", jobsNow)
 	tbl := res.(Table)
 	one := Table{Cols: tbl.Cols, Rows: tbl.Rows[:1]}
 

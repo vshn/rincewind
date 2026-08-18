@@ -21,6 +21,12 @@ type machineConfigPool struct {
 	} `json:"metadata"`
 	Spec struct {
 		Paused bool `json:"paused"`
+		// NodeSelector is how a pool says which nodes it covers, and the way
+		// from a stalled pool to the node holding it up.
+		NodeSelector struct {
+			MatchLabels      map[string]string `json:"matchLabels"`
+			MatchExpressions []any             `json:"matchExpressions"`
+		} `json:"nodeSelector"`
 	} `json:"spec"`
 	Status struct {
 		Configuration struct {
@@ -72,7 +78,6 @@ var poolEmphasis = map[string]Emphasis{
 // they use the unscoped client.
 func addMCO(r *Registry, c kube.Client) {
 	mco := c.In(mcoNamespace)
-	clusterAdmin := c.As(adminUser)
 
 	r.Add(View{
 		Group: "upgrade", Name: "progress",
@@ -81,20 +86,6 @@ func addMCO(r *Registry, c kube.Client) {
 		Available: c.Available,
 		Run: func(ctx context.Context, _ Args) (Result, error) {
 			return clusterVersion(ctx, c)
-		},
-	})
-
-	r.Add(View{
-		Group: "upgrade", Name: "pools",
-		Short:     "List MachineConfigPools and their rollout",
-		Kind:      Snapshot,
-		Available: c.Available,
-		Actions: []Action{
-			poolPauseAction(clusterAdmin, true),
-			poolPauseAction(clusterAdmin, false),
-		},
-		Run: func(ctx context.Context, _ Args) (Result, error) {
-			return machineConfigPools(ctx, c)
 		},
 	})
 
@@ -185,14 +176,30 @@ func upgradeProgress(conds []jobCondition) (state, detail string) {
 	return state, detail
 }
 
-func machineConfigPools(ctx context.Context, c kube.Client) (Result, error) {
-	var list kube.List[json.RawMessage]
-	if err := kube.GetInto(ctx, c, &list, "get", "machineconfigpool"); err != nil {
+func listPools(ctx context.Context, c kube.Client, only string) ([]machineConfigPool, error) {
+	args := []string{"get", "machineconfigpool"}
+	if only != "" {
+		args = append(args, only)
+	}
+
+	raw, err := c.Output(ctx, append(args, "-o", "json")...)
+	if err != nil {
 		return nil, err
 	}
 
-	pools := make([]machineConfigPool, 0, len(list.Items))
-	for _, doc := range list.Items {
+	var docs []json.RawMessage
+	if only != "" {
+		docs = []json.RawMessage{raw}
+	} else {
+		var list kube.List[json.RawMessage]
+		if err := json.Unmarshal(raw, &list); err != nil {
+			return nil, fmt.Errorf("decoding machine config pools: %w", err)
+		}
+		docs = list.Items
+	}
+
+	pools := make([]machineConfigPool, 0, len(docs))
+	for _, doc := range docs {
 		var p machineConfigPool
 		if err := json.Unmarshal(doc, &p); err != nil {
 			return nil, fmt.Errorf("decoding machine config pool: %w", err)
@@ -202,6 +209,26 @@ func machineConfigPools(ctx context.Context, c kube.Client) (Result, error) {
 		}
 		p.raw = doc
 		pools = append(pools, p)
+	}
+	return pools, nil
+}
+
+func poolNames(ctx context.Context, c kube.Client) ([]string, error) {
+	pools, err := listPools(ctx, c, "")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(pools))
+	for _, p := range pools {
+		out = append(out, p.Metadata.Name)
+	}
+	return out, nil
+}
+
+func machineConfigPools(ctx context.Context, c kube.Client, only string) (Result, error) {
+	pools, err := listPools(ctx, c, only)
+	if err != nil {
+		return nil, err
 	}
 
 	// Objects with a health state, so trouble first. See docs/architecture.md.

@@ -72,7 +72,7 @@ esac`
 func TestPoolsSortTroubleFirst(t *testing.T) {
 	c, _ := fakeMCO(t)
 
-	res, err := machineConfigPools(context.Background(), c)
+	res, err := machineConfigPools(context.Background(), c, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestPoolsSortTroubleFirst(t *testing.T) {
 func TestPoolStateCoversEveryDegradedCondition(t *testing.T) {
 	c, _ := fakeMCO(t)
 
-	res, _ := machineConfigPools(context.Background(), c)
+	res, _ := machineConfigPools(context.Background(), c, "")
 	if got := cellAt(t, res, 0, 1); got != "Degraded" {
 		t.Errorf("worker state = %q, want Degraded (it has NodeDegraded)", got)
 	}
@@ -104,7 +104,7 @@ func TestPoolStateCoversEveryDegradedCondition(t *testing.T) {
 func TestPausedPoolIsMarked(t *testing.T) {
 	c, _ := fakeMCO(t)
 
-	res, _ := machineConfigPools(context.Background(), c)
+	res, _ := machineConfigPools(context.Background(), c, "")
 	if got := cellAt(t, res, 0, 2); got != "PAUSED" {
 		t.Errorf("worker paused cell = %q", got)
 	}
@@ -116,7 +116,7 @@ func TestPausedPoolIsMarked(t *testing.T) {
 func TestPoolCountsAreShownAsProgress(t *testing.T) {
 	c, _ := fakeMCO(t)
 
-	res, _ := machineConfigPools(context.Background(), c)
+	res, _ := machineConfigPools(context.Background(), c, "")
 	if got := cellAt(t, res, 0, 3); got != "7/12" {
 		t.Errorf("updated = %q", got)
 	}
@@ -131,7 +131,7 @@ func TestPoolCountsAreShownAsProgress(t *testing.T) {
 func TestPoolPauseSendsTheShownPools(t *testing.T) {
 	c, read := fakeMCO(t)
 
-	res, _ := machineConfigPools(context.Background(), c)
+	res, _ := machineConfigPools(context.Background(), c, "")
 	if _, err := poolPauseAction(c, true).Run(context.Background(), res, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestPoolPauseSendsTheShownPools(t *testing.T) {
 
 func TestPoolPauseAndUnpauseDifferOnlyInTheValue(t *testing.T) {
 	c, read := fakeMCO(t)
-	res, _ := machineConfigPools(context.Background(), c)
+	res, _ := machineConfigPools(context.Background(), c, "")
 
 	poolPauseAction(c, true).Run(context.Background(), res, nil)
 	pauseArgs, _ := read()
@@ -228,7 +228,7 @@ func TestLogsReadTheControllerDeployment(t *testing.T) {
 func TestClusterScopedViewsUseNoNamespace(t *testing.T) {
 	c, read := fakeMCO(t)
 
-	machineConfigPools(context.Background(), c)
+	machineConfigPools(context.Background(), c, "")
 	if args, _ := read(); strings.Contains(args, "-n ") {
 		t.Errorf("machineconfigpool was scoped to a namespace: %q", args)
 	}
