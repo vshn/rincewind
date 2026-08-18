@@ -47,6 +47,9 @@ type node struct {
 	raw json.RawMessage
 }
 
+func (n node) name() string              { return n.Metadata.Name }
+func (n *node) keep(doc json.RawMessage) { n.raw = doc }
+
 func (n node) ann(key string) string { return n.Metadata.Annotations[key] }
 
 // roles reads the node-role labels. A node can hold several, and on a
@@ -320,43 +323,11 @@ func Nodes(c kube.Client) *Registry {
 }
 
 func listNodes(ctx context.Context, c kube.Client, selector, only string) ([]node, error) {
-	args := []string{"get", "nodes"}
-	if only != "" {
-		args = append(args, only)
-	}
+	var extra []string
 	if selector != "" {
-		args = append(args, "-l", selector)
+		extra = []string{"-l", selector}
 	}
-
-	raw, err := c.Output(ctx, append(args, "-o", "json")...)
-	if err != nil {
-		return nil, err
-	}
-
-	var docs []json.RawMessage
-	if only != "" {
-		docs = []json.RawMessage{raw}
-	} else {
-		var list kube.List[json.RawMessage]
-		if err := json.Unmarshal(raw, &list); err != nil {
-			return nil, fmt.Errorf("decoding nodes: %w", err)
-		}
-		docs = list.Items
-	}
-
-	nodes := make([]node, 0, len(docs))
-	for _, doc := range docs {
-		var n node
-		if err := json.Unmarshal(doc, &n); err != nil {
-			return nil, fmt.Errorf("decoding node: %w", err)
-		}
-		if n.Metadata.Name == "" {
-			return nil, fmt.Errorf("%s: response is not a Node", c.Describe(args...))
-		}
-		n.raw = doc
-		nodes = append(nodes, n)
-	}
-	return nodes, nil
+	return fetch[node](ctx, c, "Node", "nodes", only, extra...)
 }
 
 func nodeNames(ctx context.Context, c kube.Client) ([]string, error) {

@@ -43,6 +43,9 @@ type machineConfigPool struct {
 	raw json.RawMessage
 }
 
+func (p machineConfigPool) name() string              { return p.Metadata.Name }
+func (p *machineConfigPool) keep(doc json.RawMessage) { p.raw = doc }
+
 func (p machineConfigPool) isTrue(kind string) bool {
 	for _, c := range p.Status.Conditions {
 		if c.Type == kind {
@@ -177,40 +180,7 @@ func upgradeProgress(conds []jobCondition) (state, detail string) {
 }
 
 func listPools(ctx context.Context, c kube.Client, only string) ([]machineConfigPool, error) {
-	args := []string{"get", "machineconfigpool"}
-	if only != "" {
-		args = append(args, only)
-	}
-
-	raw, err := c.Output(ctx, append(args, "-o", "json")...)
-	if err != nil {
-		return nil, err
-	}
-
-	var docs []json.RawMessage
-	if only != "" {
-		docs = []json.RawMessage{raw}
-	} else {
-		var list kube.List[json.RawMessage]
-		if err := json.Unmarshal(raw, &list); err != nil {
-			return nil, fmt.Errorf("decoding machine config pools: %w", err)
-		}
-		docs = list.Items
-	}
-
-	pools := make([]machineConfigPool, 0, len(docs))
-	for _, doc := range docs {
-		var p machineConfigPool
-		if err := json.Unmarshal(doc, &p); err != nil {
-			return nil, fmt.Errorf("decoding machine config pool: %w", err)
-		}
-		if p.Metadata.Name == "" {
-			return nil, fmt.Errorf("response is not a MachineConfigPool")
-		}
-		p.raw = doc
-		pools = append(pools, p)
-	}
-	return pools, nil
+	return fetch[machineConfigPool](ctx, c, "MachineConfigPool", "machineconfigpool", only)
 }
 
 func poolNames(ctx context.Context, c kube.Client) ([]string, error) {

@@ -47,6 +47,9 @@ type hookEntry struct {
 
 // condition finds one by type. A condition that has never transitioned is
 // simply absent, which is what makes a pending job look empty.
+func (j upgradeJob) name() string              { return j.Metadata.Name }
+func (j *upgradeJob) keep(doc json.RawMessage) { j.raw = doc }
+
 func (j upgradeJob) condition(kind string) (jobCondition, bool) {
 	for _, c := range j.Status.Conditions {
 		if c.Type == kind {
@@ -161,40 +164,7 @@ var hookEmphasis = map[string]Emphasis{
 }
 
 func listJobs(ctx context.Context, c kube.Client, only string) ([]upgradeJob, error) {
-	args := []string{"get", "upgradejob"}
-	if only != "" {
-		args = append(args, only)
-	}
-
-	raw, err := c.Output(ctx, append(args, "-o", "json")...)
-	if err != nil {
-		return nil, err
-	}
-
-	var docs []json.RawMessage
-	if only != "" {
-		docs = []json.RawMessage{raw}
-	} else {
-		var list kube.List[json.RawMessage]
-		if err := json.Unmarshal(raw, &list); err != nil {
-			return nil, fmt.Errorf("decoding upgrade jobs: %w", err)
-		}
-		docs = list.Items
-	}
-
-	jobs := make([]upgradeJob, 0, len(docs))
-	for _, doc := range docs {
-		var j upgradeJob
-		if err := json.Unmarshal(doc, &j); err != nil {
-			return nil, fmt.Errorf("decoding upgrade job: %w", err)
-		}
-		if j.Metadata.Name == "" {
-			return nil, fmt.Errorf("%s: response is not an UpgradeJob", c.Describe(args...))
-		}
-		j.raw = doc
-		jobs = append(jobs, j)
-	}
-	return jobs, nil
+	return fetch[upgradeJob](ctx, c, "UpgradeJob", "upgradejob", only)
 }
 
 func upgradeJobs(ctx context.Context, c kube.Client, only string, now time.Time) (Result, error) {

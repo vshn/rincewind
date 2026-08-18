@@ -57,6 +57,9 @@ type resource struct {
 
 // automated reports whether auto-sync is on. This is what pause and unpause
 // toggle, and the zsh script gave no way to see it.
+func (a application) name() string              { return a.Metadata.Name }
+func (a *application) keep(doc json.RawMessage) { a.raw = doc }
+
 func (a application) automated() bool {
 	return a.Spec.SyncPolicy != nil && a.Spec.SyncPolicy.Automated != nil
 }
@@ -198,44 +201,7 @@ func appNames(ctx context.Context, c kube.Client) ([]string, error) {
 // listApps fetches applications, optionally just one, and keeps each raw
 // document for the actions.
 func listApps(ctx context.Context, c kube.Client, only string) ([]application, error) {
-	args := []string{"get", "applications.argoproj.io"}
-	if only != "" {
-		args = append(args, only)
-	}
-
-	raw, err := c.Output(ctx, append(args, "-o", "json")...)
-	if err != nil {
-		return nil, err
-	}
-
-	// A named get returns the object itself, a bare one returns a List.
-	var docs []json.RawMessage
-	if only != "" {
-		docs = []json.RawMessage{raw}
-	} else {
-		var list kube.List[json.RawMessage]
-		if err := json.Unmarshal(raw, &list); err != nil {
-			return nil, fmt.Errorf("decoding applications: %w", err)
-		}
-		docs = list.Items
-	}
-
-	apps := make([]application, 0, len(docs))
-	for _, doc := range docs {
-		var a application
-		if err := json.Unmarshal(doc, &a); err != nil {
-			return nil, fmt.Errorf("decoding application: %w", err)
-		}
-		// Anything that is not an Application still decodes cleanly into all
-		// zero values, which would surface as an empty table rather than as a
-		// problem. The name is the cheapest thing to insist on.
-		if a.Metadata.Name == "" {
-			return nil, fmt.Errorf("%s: response is not an Application", c.Describe(args...))
-		}
-		a.raw = doc
-		apps = append(apps, a)
-	}
-	return apps, nil
+	return fetch[application](ctx, c, "Application", "applications.argoproj.io", only)
 }
 
 // argoEmphasis is what makes a 200-row list scannable rather than readable.

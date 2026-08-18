@@ -3,7 +3,6 @@ package catalog
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sort"
 	"time"
 
@@ -46,6 +45,9 @@ type suspension struct {
 
 // source says who owns the window, which is what decides whether deleting it
 // is safe or whether ArgoCD will simply put it back.
+func (w suspension) name() string              { return w.Metadata.Name }
+func (w *suspension) keep(doc json.RawMessage) { w.raw = doc }
+
 func (w suspension) source() string {
 	switch {
 	case w.Metadata.Labels[argoLabel] != "":
@@ -145,29 +147,7 @@ var suspensionEmphasis = map[string]Emphasis{
 }
 
 func listSuspensions(ctx context.Context, c kube.Client) ([]suspension, error) {
-	raw, err := c.Output(ctx, "get", suspensionKind, "-o", "json")
-	if err != nil {
-		return nil, err
-	}
-
-	var list kube.List[json.RawMessage]
-	if err := json.Unmarshal(raw, &list); err != nil {
-		return nil, fmt.Errorf("decoding suspension windows: %w", err)
-	}
-
-	out := make([]suspension, 0, len(list.Items))
-	for _, doc := range list.Items {
-		var w suspension
-		if err := json.Unmarshal(doc, &w); err != nil {
-			return nil, fmt.Errorf("decoding suspension window: %w", err)
-		}
-		if w.Metadata.Name == "" {
-			return nil, fmt.Errorf("%s: response is not an %s", c.Describe("get", suspensionKind), suspensionKind)
-		}
-		w.raw = doc
-		out = append(out, w)
-	}
-	return out, nil
+	return fetch[suspension](ctx, c, suspensionKind, suspensionKind, "")
 }
 
 func upgradeSuspensions(ctx context.Context, c kube.Client, now time.Time) (Result, error) {
