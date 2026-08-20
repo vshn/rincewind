@@ -69,6 +69,10 @@ with `esc` to stop and `r` to start again.
 Following pauses while its tab is in the background,
 so nothing keeps running behind a tab nobody is looking at.
 
+The kubectl context is shown top right, and asked for again whenever the view
+changes — so what you are about to act on is on screen before you act.
+Without a kubectl, or without a current context, nothing is shown there.
+
 In the TUI: `⏎` runs the view under the cursor, `⇥` focuses the output,
 `/` filters, `space`/`a` select rows, `r` reloads, `q` quits.
 In the output pane the view's own action keys apply —

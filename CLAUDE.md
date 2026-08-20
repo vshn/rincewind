@@ -18,8 +18,7 @@ All 16 of the previous generation's views are ported,
 the two log views as followed text views.
 TUI only.
 
-Not built yet: the cluster-name probe, deliberately deferred;
-batched (`once:`) actions; CLI output mode;
+Not built yet: batched (`once:`) actions; CLI output mode;
 `loki` and `pods`; a managed port-forward for `argo ui`.
 
 ## Docs
@@ -119,6 +118,10 @@ Both kinds of action open a tab; `esc` closes it.
   Never hardcode `/bin/bash`; per-view `source.shell` is the override.
 - **Parameters become environment variables**,
   never text templated into the script.
+- **`kubectl config current-context` is the one producer named in Go**,
+  for the cluster shown top right, and nowhere else.
+  Which cluster one is pointed at cannot come from the hat.
+  The context, never reachability; re-asked when the view on screen changes.
 - **Probe capabilities, not `runtime.GOOS`.**
 
 ## Imports
