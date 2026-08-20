@@ -88,6 +88,9 @@ func TestParseSource(t *testing.T) {
 		{"git@github.com:vshn/private-hats.git", "git@github.com:vshn/private-hats.git", "github.com/vshn/private-hats"},
 		// A self-hosted forge with a subgroup keeps every segment.
 		{"https://git.vshn.net/team/infra/hats", "https://git.vshn.net/team/infra/hats", "git.vshn.net/team/infra/hats"},
+		// A repository already on disk: how a hat's author installs their own.
+		{"/srv/git/my-hats", "/srv/git/my-hats", "local/my-hats"},
+		{"file:///srv/git/my-hats.git", "file:///srv/git/my-hats.git", "local/my-hats"},
 	}
 	for _, tc := range cases {
 		got, err := ParseSource(tc.in)
@@ -108,8 +111,9 @@ func TestParseSource(t *testing.T) {
 // to die while it is still a string.
 func TestParseSourceRefusals(t *testing.T) {
 	for _, in := range []string{
-		"", "rincewind", "vshn/", "/rincewind",
+		"", "rincewind", "vshn/", "vshn/rincewind/extra",
 		"https://github.com/vshn", "https://github.com/../../etc",
+		"file:///", "/",
 	} {
 		if got, err := ParseSource(in); err == nil {
 			t.Errorf("%q was accepted as %+v", in, got)

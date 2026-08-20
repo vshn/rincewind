@@ -87,7 +87,7 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVarP(&hatFlag, "hat", "h", "",
 		"directory the views are pulled out of")
-	rootCmd.AddCommand(checkCmd, versionCmd, viewCmd)
+	rootCmd.AddCommand(checkCmd, versionCmd, viewCmd, hatsCmd)
 }
 
 // Execute runs the root command. Errors are printed by cobra; printing them

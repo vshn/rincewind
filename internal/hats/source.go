@@ -6,6 +6,7 @@ package hats
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
@@ -31,6 +32,7 @@ type Source struct {
 //	vshn/rincewind
 //	https://github.com/vshn/rincewind[.git]
 //	git@github.com:vshn/private-hats[.git]
+//	/path/to/a/repo  or  file:///path/to/a/repo
 func ParseSource(s string) (Source, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -40,11 +42,30 @@ func ParseSource(s string) (Source, error) {
 	switch {
 	case strings.HasPrefix(s, "http://"), strings.HasPrefix(s, "https://"):
 		return fromURL(s)
+	case strings.HasPrefix(s, "file://"), strings.HasPrefix(s, "/"):
+		return fromLocal(s)
 	case strings.Contains(s, "@") && strings.Contains(s, ":"):
 		return fromSCP(s)
 	default:
 		return fromShorthand(s)
 	}
+}
+
+// fromLocal handles a repository already on disk — how a hat's author
+// installs their own before it is anywhere else. Only absolute paths, which
+// is what keeps it apart from the owner/repo shorthand: that never starts
+// with a slash.
+//
+// There is no host to build a slug from, so it gets "local". Two local
+// repositories with the same basename collide, and the second install says
+// so rather than overwriting the first.
+func fromLocal(s string) (Source, error) {
+	path := strings.TrimPrefix(s, "file://")
+	name := strings.TrimSuffix(filepath.Base(strings.TrimRight(path, "/")), ".git")
+	if name == "" || name == "." || name == string(filepath.Separator) {
+		return Source{}, fmt.Errorf("%q does not name a repository directory", s)
+	}
+	return Source{URL: s, Slug: "local/" + name}, nil
 }
 
 // fromShorthand expands owner/repo. GitHub is assumed here and only here:
@@ -54,7 +75,7 @@ func fromShorthand(s string) (Source, error) {
 	parts := strings.Split(strings.TrimSuffix(s, "/"), "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return Source{}, fmt.Errorf(
-			"%q is not a repository: use owner/repo, an https URL, or an ssh URL", s)
+			"%q is not a repository: use owner/repo, an https or ssh URL, or an absolute path", s)
 	}
 	repo := strings.TrimSuffix(parts[1], ".git")
 	return Source{
