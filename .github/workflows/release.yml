@@ -7,8 +7,12 @@ on:
   workflow_dispatch:
 
 # Named here rather than granted repo-wide, so the file says what it may do.
+# Naming any of them sets every other to none, so the list must be complete:
+# write for the release and its assets, read for the pull requests the
+# changelog is built from.
 permissions:
   contents: write
+  pull-requests: read
 
 jobs:
   goreleaser:

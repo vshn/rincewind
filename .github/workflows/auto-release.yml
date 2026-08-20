@@ -7,10 +7,23 @@ on:
       - unlabeled
       - closed
 
+# Naming any permission sets every other to none, so the list must be
+# complete: the action pushes the tag, keeps a comment on the pull request
+# saying what merging will release, and dispatches the release workflow —
+# which it has to, because a tag pushed by GITHUB_TOKEN starts nothing.
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
 jobs:
   create-release-tag:
     runs-on: ubuntu-latest
     steps:
+      # Labelling a pull request bump:patch, bump:minor or bump:major and
+      # merging it creates the next SemVer tag, then runs the workflow named
+      # below on that tag. It is matched by name, and needs workflow_dispatch
+      # in its triggers — release.yml has both.
       - name: Create new tag
         uses: projectsyn/pr-label-tag-action@v1
         with:
