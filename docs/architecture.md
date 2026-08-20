@@ -317,6 +317,52 @@ One of them pipes through `grep`, which needs `--line-buffered`:
 a pipe makes grep hold its output back in 4k blocks,
 and a followed log delivered in blocks is a followed log that looks stuck.
 
+## The cluster
+
+The kubectl context is shown **top right**, in the title bar,
+because acting on the wrong cluster is the expensive mistake this tool can help make.
+The right edge is the same column on every screen,
+where a left-aligned label would shift with the length of the view id beside it —
+which is what lets it be found without being read.
+
+It is asked for by running `kubectl config current-context`,
+which is the one place in this tool's Go code that names a producer.
+The exception is deliberate and narrow.
+Everywhere else kubectl is hat business,
+but *which* cluster one is pointed at cannot come from the hat:
+a hat is a set of views, and the answer changes without any of them changing.
+Reading it from the same kubeconfig the scripts read
+is what makes the display and the scripts agree.
+
+**The context, not reachability.**
+`current-context` reads `~/.kube/config` and answers in tens of milliseconds;
+asking the API server whether it is up costs a round trip on every view change,
+and would blank the display exactly when a cluster is unwell —
+which is when knowing which cluster it is matters most.
+Whether it answers at all is what running a view already tells you.
+
+**Asked again whenever the view on screen changes.**
+Once at startup would go stale
+the moment someone switches context in another terminal,
+and stale is worse than absent for something read before a mutation.
+A two-second TTL collapses a held-down tab key into one run.
+The hook sits in one place — the key handler compares the view before and after —
+rather than in `open`, `drill`, `activate` and `closeTab`,
+which would drift apart.
+
+**The title yields to it, and a bar too narrow for both drops it whole.**
+What the view is called matters less than which cluster it is showing;
+and half of two similar context names is the same half,
+so a clipped one is worse than none.
+
+**No answer means nothing is shown**, and no room is taken.
+No kubectl, or no current context, is not a cluster session;
+a probe that fails has nothing one could act on,
+and a broken cluster is reported by the views themselves.
+`hats/demo`, which invents its data, is the case to keep in mind:
+what is shown is the context the scripts *would* use,
+which is the truth a hat cannot override.
+
 ## The hat
 
 The views are pulled out of a **hat**:
@@ -525,4 +571,8 @@ hats/              albedaran (a real cluster), demo (invents its data)
 | One table renderer, styling after layout | Escape codes in cells misalign everything that measures naively |
 | Cell errors render `!err` + note, view survives | One broken expression must not take down 199 good rows |
 | No shelling out to jq/column/pbcopy/… from Go | Each has a Go replacement; scripts in a hat may do what they like |
+| The cluster comes from kubectl, not from the hat | A hat is a set of views; which cluster one is pointed at changes without any of them changing, and reading the same kubeconfig the scripts read is what makes the two agree |
+| The context, not reachability | Instant and local, where a round trip per view change would blank the display exactly when a cluster is unwell; running a view already proves whether it answers |
+| Re-probed when the view on screen changes | Once at startup goes stale the moment someone switches context in another terminal, and stale is worse than absent before a mutation |
+| A failed probe shows nothing | There is nothing to act on, and a broken cluster is reported by the views themselves |
 | Probe capabilities, not `runtime.GOOS` | Environments lie less than platform names |

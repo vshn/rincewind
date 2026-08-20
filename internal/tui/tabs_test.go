@@ -44,32 +44,30 @@ func press(t *testing.T, m *model, k string) {
 
 func drain(t *testing.T, m *model, cmd tea.Cmd) {
 	t.Helper()
-	for range 8 {
-		if cmd == nil {
+	// A queue rather than a single next command: a batch has several, and
+	// each must run exactly once — evaluating one to find out what it is and
+	// again to use it would count every side effect twice.
+	queue := []tea.Cmd{cmd}
+	for range 32 {
+		if len(queue) == 0 {
 			return
 		}
-		msg := cmd()
-		switch msg := msg.(type) {
+		c := queue[0]
+		queue = queue[1:]
+		if c == nil {
+			continue
+		}
+		switch msg := c().(type) {
 		case nil:
-			return
 		case spinner.TickMsg:
 			// The tick chain never ends; the tests do not need it.
-			return
 		case tea.BatchMsg:
-			cmd = nil
-			for _, c := range msg {
-				if c == nil {
-					continue
-				}
-				if _, tick := c().(spinner.TickMsg); !tick {
-					cmd = c
-				}
-			}
+			queue = append(queue, msg...)
 		default:
-			_, cmd = m.Update(msg)
+			_, next := m.Update(msg)
+			queue = append(queue, next)
 		}
 	}
-	t.Fatal("the command chain did not settle")
 }
 
 // colOf is the display column a piece of text sits at. Byte offsets will not

@@ -58,6 +58,7 @@ var (
 	borderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	focusBorder  = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
 	tabStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	clusterStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("5"))
 	keyStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 	promptStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11"))
 )
@@ -240,6 +241,17 @@ type model struct {
 	// version is shown in the footer; the binary stamps it at build time.
 	version string
 
+	// cluster is the kubectl context the scripts will run against, shown top
+	// right wherever acting on the wrong one would be expensive. Empty when
+	// there is no answer, and then nothing is shown at all.
+	cluster string
+	// clusterAt is when it was last asked, so a burst of view changes costs
+	// one probe rather than one each.
+	clusterAt time.Time
+	// lookupCluster is the probe. Run sets it; newModel leaves it nil, so
+	// the tests never spawn a process and never depend on a kubeconfig.
+	lookupCluster func(context.Context) (string, error)
+
 	// tabs is never empty: the content box always shows something, even
 	// before the first run. act indexes the one on screen.
 	tabs []*tab
@@ -299,6 +311,7 @@ func (m *model) cur() *tab { return m.tabs[m.act] }
 func Run(views []engine.View, version string) error {
 	m := newModel(views)
 	m.version = version
+	m.lookupCluster = kubeContext
 
 	prog := tea.NewProgram(m)
 	_, err := prog.Run()
@@ -417,7 +430,9 @@ func (m *model) total() int {
 	}
 }
 
-func (m *model) Init() tea.Cmd { return nil }
+// Init asks which cluster this is before anything else: the answer belongs
+// on screen from the first paint, not from the first view run.
+func (m *model) Init() tea.Cmd { return m.refreshCluster() }
 
 // stop cancels the run in flight, if any.
 // stopAll cancels every run in flight, on quit.
@@ -469,6 +484,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		return m.onKey(msg)
+
+	case clusterMsg:
+		m.cluster = msg.name
+		return m, nil
 
 	case tea.MouseWheelMsg:
 		m.onWheel(msg.Button, msg.X)
@@ -589,7 +608,21 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// onKey handles a key and re-probes the cluster when the view on screen has
+// changed. Hooking it here rather than in open, drill, activate and closeTab
+// keeps the four from drifting apart, and covers whatever is added next.
 func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	before := m.cur().view
+	next, cmd := m.key(msg)
+	if m.cur().view != before {
+		if probe := m.refreshCluster(); probe != nil {
+			return next, tea.Batch(cmd, probe)
+		}
+	}
+	return next, cmd
+}
+
+func (m *model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
 	// A notice was written for the keystroke before this one.
@@ -1487,15 +1520,15 @@ func (m *model) titleLine() string {
 	name := titleStyle.Render("rincewind")
 	if j := m.cur().job; j != nil {
 		if j.asking() {
-			return name + sep + titleStyle.Render(j.action.Name) + sep +
-				descStyle.Render(j.action.Short)
+			return m.withCluster(name + sep + titleStyle.Render(j.action.Name) + sep +
+				descStyle.Render(j.action.Short))
 		}
-		return name + sep + titleStyle.Render(j.action.Name) + sep +
-			descStyle.Render(plural(len(j.steps), "step"))
+		return m.withCluster(name + sep + titleStyle.Render(j.action.Name) + sep +
+			descStyle.Render(plural(len(j.steps), "step")))
 	}
 	cur := m.cur().view
 	if cur == nil {
-		return name
+		return m.withCluster(name)
 	}
 
 	id := cur.ID
@@ -1510,13 +1543,15 @@ func (m *model) titleLine() string {
 		return line
 	}
 
+	// The title yields to the cluster, not the other way round: what the
+	// view is called matters less than which cluster it is showing.
 	if cur.Title != cur.ID {
-		room := m.width - boxPad - lipgloss.Width(line)
+		room := m.width - boxPad - lipgloss.Width(line) - m.clusterRoom()
 		if room > lipgloss.Width(sep)+lipgloss.Width(cur.Title) {
 			line += sep + descStyle.Render(cur.Title)
 		}
 	}
-	return line
+	return m.withCluster(line)
 }
 
 // argLabel names the parameters the tab was opened with, so a drilled-into
