@@ -111,8 +111,18 @@ Both kinds of action open a tab; `esc` closes it.
   counts them as width.
 - **No blocking work in bubbletea's `Update`.**
   Every script run is a `tea.Cmd`; the `seq` stale-guard stays.
-- **No shelling out to `jq`, `column`, `pbcopy`, `nc`, `base64` or `sleep`
-  from Go.**
+- **The clipboard is `Y`: OSC 52 always, plus a local writer when there is
+  one.**
+  OSC 52 alone was the plan and it does not survive contact with Terminal.app,
+  which has never implemented it;
+  NSPasteboard needs cgo, and the build is static.
+  So the writer is probed on `PATH` — `pbcopy`, `wl-copy`, `xclip`, `xsel` —
+  and skipped in an ssh session, where it would copy on the far machine.
+  A selection narrows the copy; no selection means all of it.
+- **No shelling out to `jq`, `column`, `nc`, `base64` or `sleep` from Go.**
+  Each has a Go replacement.
+  The clipboard is the one exception, above, and it is an exception because
+  that premise is false there.
   Scripts in a hat may use whatever they like.
 - **Default shell is `sh` from PATH.**
   Never hardcode `/bin/bash`; per-view `source.shell` is the override.
