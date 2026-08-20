@@ -252,6 +252,11 @@ type model struct {
 	// the tests never spawn a process and never depend on a kubeconfig.
 	lookupCluster func(context.Context) (string, error)
 
+	// clipboard is the local clipboard writer, or nil for OSC 52 alone. Run
+	// sets it; newModel leaves it nil, so running the tests cannot overwrite
+	// what the person running them had on their clipboard.
+	clipboard []string
+
 	// tabs is never empty: the content box always shows something, even
 	// before the first run. act indexes the one on screen.
 	tabs []*tab
@@ -312,6 +317,7 @@ func Run(views []engine.View, version string) error {
 	m := newModel(views)
 	m.version = version
 	m.lookupCluster = kubeContext
+	m.clipboard = localClipboard()
 
 	prog := tea.NewProgram(m)
 	_, err := prog.Run()
@@ -487,6 +493,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case clusterMsg:
 		m.cluster = msg.name
+		return m, nil
+
+	case copiedMsg:
+		// Only a failure is worth saying: the notice already claimed the
+		// copy, and it has to be taken back rather than left standing.
+		if msg.err != nil {
+			m.notice = "copy failed: " + msg.err.Error()
+		}
 		return m, nil
 
 	case tea.MouseWheelMsg:
@@ -755,6 +769,9 @@ func (m *model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "r":
 		return m, m.reload()
+
+	case "Y":
+		return m, m.copyPane()
 
 	case "enter":
 		if m.focus == paneList {
@@ -1796,6 +1813,7 @@ func (m *model) help() string {
 		if m.scrollable() {
 			keys = append(keys, helpKey{"<> scroll", 1})
 		}
+		keys = append(keys, helpKey{"Y copy", 1})
 		// Released is the surprising state, and the one you need the way
 		// back from, so it holds on to its place in a narrow legend.
 		if m.mouse {

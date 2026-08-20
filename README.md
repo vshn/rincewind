@@ -89,6 +89,14 @@ and coming back finds the filter, cursor and scroll exactly as they were.
 Both panes scroll: `↑↓`, `⇞`/`⇟` by the screenful, `home`/`end` to the ends,
 and `<` `>` sideways through wide tables — the column names stay put.
 
+`Y` copies what the output pane is showing to the clipboard, as plain text —
+the selection if there is one, otherwise everything the filter left. It uses
+`pbcopy`, `wl-copy`, `xclip` or `xsel`, whichever is on your `PATH`, and also
+sends the terminal's own clipboard escape (OSC 52) so that it works over ssh
+as well. Not every terminal implements OSC 52 — Terminal.app does not — which
+is why the local program is used when there is one; in tmux, OSC 52 needs
+`set-clipboard on`.
+
 The mouse works too: the wheel scrolls whichever pane it points at,
 a click puts the cursor on a row, and clicking a menu entry runs it.
 Press `M` to release the mouse

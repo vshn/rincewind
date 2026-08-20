@@ -317,6 +317,102 @@ One of them pipes through `grep`, which needs `--line-buffered`:
 a pipe makes grep hold its output back in 4k blocks,
 and a followed log delivered in blocks is a followed log that looks stuck.
 
+## Copying the pane
+
+`Y` puts what the output pane is showing on the system clipboard.
+
+**OSC 52, and a local writer when there is one.**
+OSC 52 — the terminal's own clipboard escape — was meant to be the whole
+mechanism, and it is the only thing that reaches the right machine over ssh.
+It does not survive contact with Terminal.app, which has never implemented it;
+the macOS clipboard is NSPasteboard, which needs cgo, and the build is static.
+So the no-shelling-out rule takes an exception here, and only here:
+its premise is that each forbidden program has a Go replacement,
+and for the clipboard that replacement does not exist.
+
+The writer is **probed on `PATH`** — `pbcopy`, `wl-copy`, `xclip`, `xsel` —
+rather than picked by `runtime.GOOS`,
+because what matters is whether the program is there;
+a Mac without `pbcopy` and a Wayland session without `wl-copy` both exist.
+It is skipped when `SSH_CONNECTION` or `SSH_TTY` is set:
+an `xclip` on the far end would copy into a clipboard nobody can paste from,
+which is worse than not copying,
+and ssh is precisely the case OSC 52 covers.
+
+**A selection narrows it, and no selection means all of it.**
+Copying is not a mutation,
+so the rule that a mutation refuses without a selection does not apply —
+but the notice says which happened,
+because "copied 3 rows" and "copied 41 rows" is the whole difference.
+The filter narrows it too, since the filter is what the pane is showing.
+
+What goes over is **plain text**:
+the header with the rows, so a table of values does not arrive without its
+column names;
+a log verbatim, indentation kept;
+and a job's commands and output with the styling and the padding taken off,
+which is how what the tool just ran reaches a ticket or a shell.
+
+**A large copy says how large — but only when OSC 52 is alone.**
+It hands the text to the terminal as one escape sequence,
+terminals cap how long one may be,
+and the write is one-way:
+reading the clipboard back is what terminals disable for security,
+so there is no way to ask whether it arrived.
+tmux also needs `set-clipboard on` to pass it through.
+A local writer has neither problem —
+no length to warn about, and an exit status that says whether it worked,
+which is then the only thing reported,
+since a notice that claimed the copy has to be taken back if it failed.
+
+## Printing a view
+
+`rincewind view <id>` runs one view and prints what it produces, without the TUI.
+A table goes out column-aligned, a text view verbatim,
+and a followed view streams until its script ends or it is interrupted.
+
+A **subcommand, not a `--view` flag.**
+A flag describes how a command works;
+this changes what the command *is* —
+not "the TUI, but with something" but "no TUI at all",
+which is what `check` and `version` already are.
+The id is an argument rather than a flag value,
+future switches like an output format hang off `view`
+instead of off a root command they mean nothing to,
+and cobra supplies the usage line, the argument check
+and completion of the view name.
+
+The same `Result` goes to both renderers,
+which is what stops the TUI and the CLI from growing separate ideas of a table.
+Two things differ, and both follow from the output not being a screen this tool owns:
+
+- **Colour only for a terminal.**
+  Asked of the writer, not of the platform:
+  piping into a file is the case that matters,
+  and it looks the same on every OS.
+  Styling still happens after the layout, so the columns line up either way.
+- **Notes go to stderr**, and the table to stdout.
+  A broken expression is a diagnostic;
+  it must not land in the file someone is piping into.
+
+A script that fails takes the command down with it,
+carrying its stderr, because a non-zero exit is what a pipeline reads.
+There is no deadline: the TUI needs one because an unreachable API server
+would leave a spinner turning with no way back,
+where out here Ctrl-C is the way back —
+and it cancels the context rather than killing the process,
+so a followed script is stopped rather than orphaned.
+
+**Parameters are not passed yet, and there is no filter.**
+A view that requires a parameter is refused
+rather than run on a value it made up,
+and the refusal names both the missing parameter and the views that do work.
+Narrowing the output is the other half of the same gap:
+in the TUI `/` is what narrows a view,
+and out here `grep` is not a substitute,
+because it takes the header with the rows it drops.
+See the decisions table.
+
 ## The cluster
 
 The kubectl context is shown **top right**, in the title bar,
@@ -563,6 +659,7 @@ hats/              albedaran (a real cluster), demo (invents its data)
 | A step is shown as env + shell + script, not one quoted line | The values never enter the script text; a quoted one-liner would misrepresent what runs |
 | The engine appends the count to a confirmation | A confirmation that fails to say how much it touches cannot be written |
 | Config validated against the target view at load | The old `no such view` was a run-time surprise; so was an argument nothing read |
+| The five list views lost their optional filter parameters in the port | In the TUI `/` does that job better; the debt is the CLI's, where `view` has no way to narrow output at all |
 | A required parameter hides a view from the menu | Running it bare would show an arbitrary object as if it were the answer; no `hidden:` flag needed |
 | Sort on raw values, before formatting | Rendered cells order neither numbers nor dates correctly |
 | Emphasis per column, on raw values | One value may mean different things in different columns |
@@ -570,7 +667,9 @@ hats/              albedaran (a real cluster), demo (invents its data)
 | `Run` returns data, never formatted strings | A string cannot be filtered, sorted or restyled |
 | One table renderer, styling after layout | Escape codes in cells misalign everything that measures naively |
 | Cell errors render `!err` + note, view survives | One broken expression must not take down 199 good rows |
-| No shelling out to jq/column/pbcopy/… from Go | Each has a Go replacement; scripts in a hat may do what they like |
+| No shelling out to jq/column/… from Go | Each has a Go replacement; scripts in a hat may do what they like |
+| …except the clipboard | OSC 52 was that replacement and Terminal.app does not implement it; NSPasteboard needs cgo and the build is static, so the premise fails and the rule yields rather than the feature |
+| The clipboard writer is probed on PATH | A Mac without pbcopy and a Wayland session without wl-copy both exist; the platform name answers a different question |
 | The cluster comes from kubectl, not from the hat | A hat is a set of views; which cluster one is pointed at changes without any of them changing, and reading the same kubeconfig the scripts read is what makes the two agree |
 | The context, not reachability | Instant and local, where a round trip per view change would blank the display exactly when a cluster is unwell; running a view already proves whether it answers |
 | Re-probed when the view on screen changes | Once at startup goes stale the moment someone switches context in another terminal, and stale is worse than absent before a mutation |
