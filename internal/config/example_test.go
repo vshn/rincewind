@@ -13,7 +13,7 @@ func TestExampleConfigWorks(t *testing.T) {
 	}
 
 	for _, v := range views {
-		if v.ID != "demo/services" {
+		if v.ID != "demo.services" {
 			continue
 		}
 		res, err := v.Run(t.Context())
@@ -32,5 +32,5 @@ func TestExampleConfigWorks(t *testing.T) {
 		}
 		return
 	}
-	t.Fatal("example config lost the demo/services view")
+	t.Fatal("example config lost the demo.services view")
 }

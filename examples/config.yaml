@@ -9,9 +9,8 @@ views:
   # Cluster-free smoke test. Two echo calls emit two JSON documents — the
   # stdout contract is a *stream* of JSON values, and `rows` runs over each,
   # so a script can pull from several sources without merging them itself.
-  - id: demo/services
+  - id: demo.services
     title: Demo services
-    group: demo
     source:
       script: |
         echo '{"items":[{"name":"api","state":"Healthy","since":"2026-08-18T09:00:00Z","restarts":2}]}'
@@ -38,9 +37,8 @@ views:
         rank: [Degraded, Healthy]
       - by: NAME
 
-  - id: argo/apps
+  - id: argo.apps
     title: Argo applications
-    group: argo
     refresh: 30s
     source:
       script: |
@@ -67,33 +65,101 @@ views:
         rank: [OutOfSync, Unknown, Synced]
       - by: NAME
 
-  - id: nodes/status
-    title: Node status
-    group: nodes
+  # Port of the old builtin `nodes status`: kubelet, scheduling and
+  # machine-config rollout. The CONFIG column judges a node against its
+  # pool's rendered target — the state annotation alone reads "Done" on a
+  # node the operator has not even told about a new config yet. That join
+  # needs both nodes and pools, so the script does it with jq and emits one
+  # enriched node object per stream value; the columns then only look at
+  # their own row. Needs jq on the PATH; pools are best effort, so the view
+  # keeps working on clusters without the MachineConfig operator.
+  - id: nodes.status
+    title: Kubelet, scheduling and machine-config rollout
     source:
       script: |
-        kubectl get nodes -o json
-    rows: .items[]
+        d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+        kubectl get nodes -o json > "$d/nodes.json"
+        kubectl get machineconfigpools -o json > "$d/pools.json" 2>/dev/null \
+          || echo '{"items":[]}' > "$d/pools.json"
+        jq -s '
+          .[1].items as $pools
+          | .[0].items[]
+          | . as $n
+          | ($n.metadata.labels // {}) as $lbl
+          | [ $pools[]
+              | (.spec.nodeSelector.matchLabels // {}) as $sel
+              | select(($sel | length) > 0
+                  and ([$sel | to_entries[] | $lbl[.key] == .value] | all)) ] as $matching
+          | ( [ $matching[] | select(.metadata.name == "master") ][0]
+              // ( [ $matching[] | select(.metadata.name != "master" and .metadata.name != "worker") ]
+                   | sort_by([-(.spec.nodeSelector.matchLabels | length), .metadata.name]) | .[0] )
+              // [ $matching[] | select(.metadata.name == "worker") ][0]
+            ) as $pool
+          | $n + {poolTarget: ($pool.status.configuration.name // "")}
+        ' "$d/nodes.json" "$d/pools.json"
+    rows: .
     key: .metadata.name
     columns:
       - name: NAME
         expr: .metadata.name
-      - name: STATUS
+      - name: ROLE
         expr: >-
-          if ([.status.conditions[] | select(.type == "Ready")][0].status == "True")
-          then "Ready" else "NotReady" end
-        emphasis: { Ready: good, NotReady: bad }
-      - name: ROLES
-        expr: >-
-          [.metadata.labels | keys[]
+          [(.metadata.labels // {}) | keys[]
            | select(startswith("node-role.kubernetes.io/"))
-           | ltrimstr("node-role.kubernetes.io/")] | join(",")
+           | ltrimstr("node-role.kubernetes.io/")
+           | select(. != "")] | sort | join(",")
+      # A node whose Ready condition is missing entirely still gets a row.
+      - name: READY
+        expr: >-
+          [.status.conditions[]? | select(.type == "Ready")][0] as $c
+          | if $c == null then "Unknown"
+            elif $c.status == "True" then "Ready"
+            elif $c.status == "False" then "NotReady"
+            else "Unknown" end
+        emphasis: { Ready: good, NotReady: bad, Unknown: bad }
+      # An absolute timestamp rather than an age: this column exists to be
+      # lined up against job start times and log lines, and "4h59m" cannot.
+      - name: SINCE
+        expr: >-
+          [.status.conditions[]? | select(.type == "Ready")][0].lastTransitionTime // ""
+        format: timestamp
+      - name: SCHED
+        expr: if .spec.unschedulable then "cordoned" else "" end
+        emphasis: { cordoned: warn }
+      # "pending": told to change, has not finished. "behind": not told yet,
+      # the pool has moved on without it.
+      - name: CONFIG
+        expr: >-
+          (.metadata.annotations // {}) as $a
+          | ($a["machineconfiguration.openshift.io/state"] // "") as $state
+          | ($a["machineconfiguration.openshift.io/currentConfig"] // "") as $cur
+          | ($a["machineconfiguration.openshift.io/desiredConfig"] // "") as $desired
+          | if $state == "Degraded" or $state == "Working" then $state
+            elif $cur == "" then $state
+            elif $desired != "" and $cur != $desired then "pending"
+            elif .poolTarget != "" and $cur != .poolTarget then "behind"
+            else $state end
+        emphasis: { Degraded: bad, Working: warn, pending: warn, behind: warn, Done: good }
       - name: VERSION
         expr: .status.nodeInfo.kubeletVersion
-      - name: AGE
-        expr: .metadata.creationTimestamp
-        format: age
+      # The operator's reason when the rollout is unhappy: "failed to drain
+      # node" beats "kubelet is posting ready status" as an explanation.
+      - name: MESSAGE
+        expr: >-
+          (.metadata.annotations // {}) as $a
+          | ($a["machineconfiguration.openshift.io/reason"] // "") as $reason
+          | if ($a["machineconfiguration.openshift.io/state"] == "Degraded" and $reason != "")
+            then $reason
+            else ([.status.conditions[]? | select(.type == "Ready")][0].message // "") end
+    # Trouble first: broken kubelet, then a struggling rollout, then merely
+    # cordoned; within a class the most recent change on top.
     sort:
-      - by: STATUS
-        rank: [NotReady, Ready]
+      - by: READY
+        rank: [NotReady, Unknown, Ready]
+      - by: CONFIG
+        rank: [Degraded, Working, pending, behind]
+      - by: SCHED
+        rank: [cordoned]
+      - by: SINCE
+        order: desc
       - by: NAME
