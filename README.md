@@ -60,7 +60,14 @@ and `esc` takes you back to the list untouched.
 rincewind                      # TUI; views from the hat at ~/.config/rincewind/
 rincewind --hat ./hats/demo    # try it without a cluster (demo view included)
 rincewind check                # validate the hat without starting the TUI
+rincewind view nodes.status    # print one view and exit, no TUI
 ```
+
+`view` writes a table column-aligned, a log verbatim, and a followed view as
+it streams. Colour is used only when the output is a terminal, so piping into
+a file gives plain text; cell errors go to stderr, out of the way of it. A
+view that requires a parameter is refused for now — there is no way to pass
+one yet.
 
 A view whose output is a log rather than a table is `class: text`:
 the lines arrive verbatim, `/` greps them, and the arrows scroll.

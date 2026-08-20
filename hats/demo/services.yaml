@@ -168,6 +168,9 @@ views:
   # Leaving the tab stops the script, and returning starts it again. That is
   # why a real followed view passes something like `--tail`: what happened
   # while one was away is gone, so the source has to bring some of it back.
+  # The parameter has a default rather than being required, so this view can
+  # also be started on its own — from the menu, or by `rincewind view`, which
+  # has no way to pass one.
   - id: demo.tail
     title: One service's log, followed
     class: text
@@ -175,7 +178,7 @@ views:
     params:
       - name: service
         short: service name
-        required: true
+        default: api
     source:
       script: |
         echo "2026-08-20T07:30:01Z INFO  starting $service"

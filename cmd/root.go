@@ -4,9 +4,12 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -84,13 +87,19 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVarP(&hatFlag, "hat", "h", "",
 		"directory the views are pulled out of")
-	rootCmd.AddCommand(checkCmd, versionCmd)
+	rootCmd.AddCommand(checkCmd, versionCmd, viewCmd)
 }
 
 // Execute runs the root command. Errors are printed by cobra; printing them
 // again here would double every message.
+//
+// Ctrl-C cancels the context rather than killing the process outright, so a
+// followed view stops its script and a run in flight is not left behind.
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		os.Exit(1)
 	}
 }
