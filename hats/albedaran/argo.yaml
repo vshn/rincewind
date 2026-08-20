@@ -62,14 +62,12 @@ views:
       - key: p
         name: pause
         short: Pause auto-sync
-        confirm: >-
-          "Pause auto-sync on \(map(.metadata.name) | join(", "))" +
-          (if any(.[]; .metadata.name == "root") then ""
-           else "\n\nThe app-of-apps \"root\" is not in this set. Unless it is paused too, it will revert the change on its next sync."
-           end)
+        confirm: '"Pause auto-sync on \(map(.metadata.name) | join(", "))"'
         env:
           app: .metadata.name
         script: |
+          kubectl -n syn --as system:admin patch applications.argoproj.io root \
+            --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}'
           kubectl -n syn --as system:admin patch applications.argoproj.io "$app" \
             --type merge -p '{"spec":{"syncPolicy":{"automated":null}}}'
         reload: true
