@@ -38,6 +38,11 @@ In the TUI: `⏎` runs the view under the cursor, `⇥` focuses the output,
 Both panes scroll: `↑↓`, `⇞`/`⇟` by the screenful, `home`/`end` to the ends,
 and `<` `>` sideways through wide tables — the column names stay put.
 
+The mouse works too: the wheel scrolls whichever pane it points at, a click
+puts the cursor on a row, and clicking a menu entry runs it. Press `m` to
+release the mouse when you want the terminal's own text selection back for
+copying, and `m` again to take it back.
+
 ## Build
 
 ```

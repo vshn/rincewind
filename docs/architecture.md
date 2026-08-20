@@ -172,6 +172,15 @@ examples/          shipped example config, kept green by a test
   windows onto the menu the same way.
 - The key legend is weighted: when the footer box is too narrow the lightest
   keys are dropped rather than the line being clipped mid-word.
+- The mouse acts on **what it points at**, not on what has the keyboard: the
+  wheel over the table scrolls the table even while the menu is focused.
+  Hit-testing counts from the same layout constants the renderer draws with,
+  so the two cannot drift; the tests aim at lines found in the rendered
+  output rather than at numbers worked out a second time.
+- Capturing the mouse costs the terminal's own text selection, which matters
+  for a tool people copy node names out of. `MouseMode` is a field of the
+  frame in bubbletea v2, so `m` toggling a bool is the whole mechanism —
+  released, the terminal handles selection and copying as usual.
 - Tests drive `model.Update` with synthetic messages and assert on
   `View().Content` — no terminal, no golden files. The fixture views are
   built in memory; one of them sleeps, which is how the tests check that

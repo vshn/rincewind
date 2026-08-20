@@ -24,9 +24,12 @@ const (
 	// sidebarWidth is the outer width of the sidebar box, and of the version
 	// box below it: the two frames line up into one column.
 	sidebarWidth = 30
+	// titleHeight is the title box: border, text, border. Hit-testing counts
+	// from it, so the mouse and the renderer share one idea of the layout.
+	titleHeight = 3
 	// frameChrome is the title box above and the footer boxes below the
 	// body, three lines each.
-	frameChrome = 6
+	frameChrome = 2 * titleHeight
 	// boxPad is what a frame adds around its text: border plus one space of
 	// padding on each side.
 	boxPad = 4
@@ -120,6 +123,11 @@ type model struct {
 	// their box.
 	sideTop int
 
+	// mouse reports whether the terminal's mouse is captured. Capturing it
+	// takes away the terminal's own text selection, which for a tool people
+	// copy node names out of is a real loss — hence the toggle.
+	mouse bool
+
 	seq     int
 	running bool
 	res     *engine.Table
@@ -151,6 +159,7 @@ func newModel(views []engine.View) *model {
 		spin:      spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 		vp:        viewport.New(),
 		selection: map[string]bool{},
+		mouse:     true,
 	}
 	m.filter = textinput.New()
 	m.filter.Prompt = "/"
@@ -244,6 +253,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		return m.onKey(msg)
+
+	case tea.MouseWheelMsg:
+		m.onWheel(msg.Button, msg.X)
+		return m, nil
+
+	case tea.MouseClickMsg:
+		if msg.Button == tea.MouseLeft {
+			return m, m.onClick(msg.X, msg.Y)
+		}
+		return m, nil
 
 	case resultMsg:
 		// A superseded run finishing late must not clobber the current view.
@@ -406,12 +425,114 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "a":
 		m.toggleAll()
 		return m, nil
+
+	case "m":
+		// Releasing the mouse hands text selection back to the terminal,
+		// which is how one copies a node name out of a row.
+		m.mouse = !m.mouse
+		return m, nil
 	}
 
 	// Anything else scrolls the output pane.
 	var cmd tea.Cmd
 	m.vp, cmd = m.vp.Update(msg)
 	return m, cmd
+}
+
+// The mouse acts on what it points at, not on what has the keyboard: the
+// wheel over the table scrolls the table even while the menu is focused,
+// which is the whole reason for reaching for the mouse in the first place.
+const wheelStep = 3
+
+func (m *model) onWheel(button tea.MouseButton, x int) {
+	overList := x < sidebarWidth
+
+	switch button {
+	case tea.MouseWheelUp:
+		if overList {
+			m.scrollSidebar(-wheelStep)
+		} else {
+			m.vp.ScrollUp(wheelStep)
+		}
+	case tea.MouseWheelDown:
+		if overList {
+			m.scrollSidebar(+wheelStep)
+		} else {
+			m.vp.ScrollDown(wheelStep)
+		}
+	case tea.MouseWheelLeft:
+		m.vp.ScrollLeft(wheelStep)
+	case tea.MouseWheelRight:
+		m.vp.ScrollRight(wheelStep)
+	}
+}
+
+// onClick puts the cursor where it was pointed. In the menu that also runs
+// the view: a menu entry one clicks is a thing one wants to see.
+func (m *model) onClick(x, y int) tea.Cmd {
+	if x < sidebarWidth {
+		i := m.entryAt(y)
+		if i < 0 {
+			return nil
+		}
+		m.cursor, m.focus = i, paneList
+		m.syncSidebar()
+		return m.open()
+	}
+
+	row := m.rowAt(y)
+	if row < 0 {
+		return nil
+	}
+	m.focus, m.row = paneOutput, row
+	m.showResult()
+	return nil
+}
+
+// scrollSidebar moves the menu window without moving the cursor: scrolling
+// is looking around, not choosing.
+func (m *model) scrollSidebar(step int) {
+	lines, _ := m.sidebarRender()
+	h := max(m.bodyBoxHeight()-2, 1)
+	if len(lines) <= h {
+		return
+	}
+	m.sideTop = min(max(m.sideTop+step, 0), len(lines)-h)
+}
+
+// rowAt maps a screen line to a data row, or -1 where no row sits. The
+// geometry is derived from the same numbers View draws with, so the two
+// cannot drift apart.
+func (m *model) rowAt(y int) int {
+	if !m.hasTable() {
+		return -1
+	}
+	// The first line inside the body box holds the sticky header; the rows
+	// begin under it.
+	top := titleHeight + 1 + 1
+	if y < top || y >= top+m.vp.Height() {
+		return -1
+	}
+	if i := y - top + m.vp.YOffset(); i < m.rowCount() {
+		return i
+	}
+	return -1
+}
+
+// entryAt maps a screen line to a menu entry, or -1 for group headers, gaps
+// and everything outside the box.
+func (m *model) entryAt(y int) int {
+	lines, owner := m.sidebarRender()
+	h := max(m.bodyBoxHeight()-2, 1)
+
+	top := titleHeight + 1
+	if y < top || y >= top+h {
+		return -1
+	}
+	if i := y - top + sidebarOffset(len(lines), h, m.sideTop); i < len(owner) {
+		return owner[i]
+	}
+	return -1
 }
 
 // toggleFocus moves the keyboard between the list and the output. Only worth
@@ -498,8 +619,16 @@ func (m *model) follow(cursor int) {
 // syncSidebar slides the menu window to keep the cursor on screen. Kept out
 // of the render so that drawing the sidebar stays free of side effects.
 func (m *model) syncSidebar() {
-	lines, cursor := m.sidebarRender()
+	lines, owner := m.sidebarRender()
 	h := max(m.bodyBoxHeight()-2, 1)
+
+	cursor := -1
+	for line, entry := range owner {
+		if entry == m.cursor {
+			cursor = line
+			break
+		}
+	}
 
 	if len(lines) <= h || cursor < 0 {
 		m.sideTop = 0
@@ -804,6 +933,13 @@ func (m *model) View() tea.View {
 	v := tea.NewView("")
 	v.AltScreen = true
 
+	// The mouse mode is a property of the frame, so the toggle is nothing
+	// but this field following the model.
+	v.MouseMode = tea.MouseModeNone
+	if m.mouse {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
+
 	if !m.ready {
 		v.Content = "loading…"
 		return v
@@ -929,30 +1065,40 @@ func (m *model) headLine() string {
 	return lipgloss.NewStyle().MaxWidth(m.contentWidth()).Render(head)
 }
 
-// sidebarRender draws the menu in full and reports which line the cursor
-// landed on, which is what the scroll window follows.
-func (m *model) sidebarRender() (lines []string, cursor int) {
-	cursor = -1
+// sidebarRender draws the menu in full and reports, per line, which entry it
+// belongs to (-1 for group headers and gaps). That mapping is what both the
+// scroll window and the mouse need.
+func (m *model) sidebarRender() (lines []string, owner []int) {
+	add := func(line string, entry int) {
+		lines = append(lines, line)
+		owner = append(owner, entry)
+	}
+
 	for i, e := range m.entries {
 		switch {
 		case e.view == nil:
 			if i > 0 {
-				lines = append(lines, "")
+				add("", -1)
 			}
-			lines = append(lines, groupStyle.Render(e.label))
-			continue
+			add(groupStyle.Render(e.label), -1)
 		case i == m.cursor && m.focus == paneList:
-			lines = append(lines, cursorStyle.Render("▸ "+e.label))
+			add(cursorStyle.Render("▸ "+e.label), i)
 		case i == m.cursor:
-			lines = append(lines, dividerStyle.Render("▸ "+e.label))
+			add(dividerStyle.Render("▸ "+e.label), i)
 		default:
-			lines = append(lines, "  "+e.label)
-		}
-		if i == m.cursor {
-			cursor = len(lines) - 1
+			add("  "+e.label, i)
 		}
 	}
-	return lines, cursor
+	return lines, owner
+}
+
+// sidebarOffset is the first menu line on screen, clamped to what the box
+// can actually show.
+func sidebarOffset(total, h, want int) int {
+	if total <= h {
+		return 0
+	}
+	return min(max(want, 0), total-h)
 }
 
 // sidebarLines is the slice of the menu that fits the box.
@@ -962,7 +1108,7 @@ func (m *model) sidebarLines() []string {
 	if len(lines) <= h {
 		return lines
 	}
-	top := min(max(m.sideTop, 0), len(lines)-h)
+	top := sidebarOffset(len(lines), h, m.sideTop)
 	return lines[top : top+h]
 }
 
@@ -1058,6 +1204,13 @@ func (m *model) help() string {
 		}
 		if m.scrollable() {
 			keys = append(keys, helpKey{"<> scroll", 1})
+		}
+		// Released is the surprising state, and the one you need the way
+		// back from, so it holds on to its place in a narrow legend.
+		if m.mouse {
+			keys = append(keys, helpKey{"m release mouse", 0})
+		} else {
+			keys = append(keys, helpKey{"m grab mouse", 3})
 		}
 	}
 	return helpStyle.Render(fitKeys(keys, m.contentWidth()))
