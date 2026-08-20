@@ -20,9 +20,15 @@ import (
 )
 
 const (
+	// sidebarWidth is the outer width of the sidebar box, and of the version
+	// box below it: the two frames line up into one column.
 	sidebarWidth = 30
-	chromeHeight = 4 // title and help line, each with a blank line inside
-	contentPad   = 2 // gap between the divider and the output
+	// frameChrome is the title box above and the footer boxes below the
+	// body, three lines each.
+	frameChrome = 6
+	// boxPad is what a frame adds around its text: border plus one space of
+	// padding on each side.
+	boxPad = 4
 )
 
 // runTimeout bounds a single script run. Without it an unreachable API server
@@ -45,12 +51,9 @@ var (
 	helpStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	errStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	noteStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
-	sidebarStyle = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder(), false, true, false, false).
-			BorderForeground(lipgloss.Color("8")).
-			Width(sidebarWidth).
-			PaddingRight(1)
-	contentStyle = lipgloss.NewStyle().PaddingLeft(contentPad)
+	borderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	focusBorder  = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+	tabStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 )
 
 // entry is one line in the sidebar. A nil view marks a group header, which
@@ -86,6 +89,9 @@ type model struct {
 	entries []entry
 	cursor  int
 
+	// version is shown in the footer; the binary stamps it at build time.
+	version string
+
 	focus pane
 	// row is the data row the output-pane cursor is on.
 	row int
@@ -117,8 +123,9 @@ type model struct {
 }
 
 // Run starts the TUI and blocks until the user quits.
-func Run(views []engine.View) error {
+func Run(views []engine.View, version string) error {
 	m := newModel(views)
+	m.version = version
 
 	prog := tea.NewProgram(m)
 	_, err := prog.Run()
@@ -539,25 +546,29 @@ func (m *model) scheduleRefresh() tea.Cmd {
 }
 
 // contentWidth is the space the output widgets may actually paint on: the
-// window minus the sidebar, its one-column border and the left padding.
-// Sizing widgets to anything wider makes rows wrap and pushes the help line
-// off screen.
+// window minus the sidebar column and the content box's own frame. Sizing
+// widgets to anything wider makes rows wrap inside the box.
 func (m *model) contentWidth() int {
-	if w := m.width - sidebarWidth - 1 - contentPad; w > 0 {
+	if w := m.width - sidebarWidth - boxPad; w > 0 {
 		return w
 	}
 	return 1
 }
 
-func (m *model) bodyHeight() int {
-	if h := m.height - chromeHeight - m.statusLines(); h > 0 {
-		return h
-	}
-	return 1
+// bodyBoxHeight is the outer height of the sidebar and content boxes:
+// whatever the title and footer frames leave.
+func (m *model) bodyBoxHeight() int {
+	return max(m.height-frameChrome, 3)
 }
 
-// statusLines is the room the status bar takes, so the body shrinks rather
-// than pushing the help line off screen.
+// vpHeight is the viewport's share of the content box: the inner height,
+// minus the status line when one is showing.
+func (m *model) vpHeight() int {
+	return max(m.bodyBoxHeight()-2-m.statusLines(), 1)
+}
+
+// statusLines is the room the status bar takes, so the viewport shrinks
+// rather than pushing rows out of the frame.
 func (m *model) statusLines() int {
 	if m.statusLine() == "" {
 		return 0
@@ -566,8 +577,6 @@ func (m *model) statusLines() int {
 }
 
 func (m *model) resize() {
-	m.vp.SetWidth(m.contentWidth())
-	m.vp.SetHeight(m.bodyHeight())
 	m.showResult()
 }
 
@@ -591,8 +600,13 @@ func filtered(t engine.Table, needle string) engine.Table {
 	return out
 }
 
-// showResult feeds the current result into the viewport.
+// showResult feeds the current result into the viewport. The widget is
+// re-sized here rather than only on window changes, because the status line
+// coming and going alters the viewport's share of the frame.
 func (m *model) showResult() {
+	m.vp.SetWidth(m.contentWidth())
+	m.vp.SetHeight(m.vpHeight())
+
 	vis := m.visible()
 
 	cursor := -1
@@ -639,6 +653,39 @@ func (m *model) tableStyle(vis engine.Table, cursor int) render.Style {
 	}
 }
 
+// frame draws a w×h box around lines, rounded corners, one space of padding
+// inside. label, when given, rides in the top border the way a tab does —
+// a future drill-down grows into a row of them, not into a new layout.
+func frame(lines []string, w, h int, bs lipgloss.Style, label string) string {
+	w, h = max(w, boxPad), max(h, 2)
+	inner := w - 2    // between the border columns
+	text := inner - 2 // minus the padding spaces
+	clip := lipgloss.NewStyle().MaxWidth(text)
+
+	top := "╭" + strings.Repeat("─", inner) + "╮"
+	if label != "" {
+		label = lipgloss.NewStyle().MaxWidth(max(text-1, 0)).Render(label)
+		fill := max(inner-1-lipgloss.Width(label), 0)
+		top = bs.Render("╭─") + label + bs.Render(strings.Repeat("─", fill)+"╮")
+	} else {
+		top = bs.Render(top)
+	}
+
+	out := make([]string, 0, h)
+	out = append(out, top)
+	side := bs.Render("│")
+	for i := 0; i < h-2; i++ {
+		line := ""
+		if i < len(lines) {
+			line = clip.Render(lines[i])
+		}
+		pad := max(text-lipgloss.Width(line), 0)
+		out = append(out, side+" "+line+strings.Repeat(" ", pad)+" "+side)
+	}
+	out = append(out, bs.Render("╰"+strings.Repeat("─", inner)+"╯"))
+	return strings.Join(out, "\n")
+}
+
 func (m *model) View() tea.View {
 	v := tea.NewView("")
 	v.AltScreen = true
@@ -648,27 +695,33 @@ func (m *model) View() tea.View {
 		return v
 	}
 
-	pane := lipgloss.NewStyle().
-		Height(m.bodyHeight()).
-		MaxHeight(m.bodyHeight()).
-		Render(m.pane())
-	if status := m.statusLine(); status != "" {
-		pane = lipgloss.JoinVertical(lipgloss.Left, pane, status)
+	// The keyboard's side of the screen carries the bright border.
+	sideBorder, outBorder := borderStyle, borderStyle
+	if m.focus == paneList {
+		sideBorder = focusBorder
+	} else {
+		outBorder = focusBorder
 	}
 
-	body := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		m.sidebarBorder().Height(m.bodyHeight()+m.statusLines()).Render(m.sidebar()),
-		contentStyle.Render(pane),
+	title := frame([]string{m.titleLine()}, m.width, 3, borderStyle, "")
+
+	body := lipgloss.JoinHorizontal(lipgloss.Top,
+		frame(m.sidebarLines(), sidebarWidth, m.bodyBoxHeight(), sideBorder, ""),
+		frame(m.contentLines(), m.width-sidebarWidth, m.bodyBoxHeight(), outBorder, m.tabLabel()),
 	)
 
-	v.Content = lipgloss.JoinVertical(lipgloss.Left, m.title(), "", body, "", m.help())
+	footer := lipgloss.JoinHorizontal(lipgloss.Top,
+		frame([]string{descStyle.Render(m.version)}, sidebarWidth, 3, borderStyle, ""),
+		frame([]string{m.help()}, m.width-sidebarWidth, 3, borderStyle, ""),
+	)
+
+	v.Content = lipgloss.JoinVertical(lipgloss.Left, title, body, footer)
 	return v
 }
 
-// title reads tool · id · title. The view title is the first thing dropped
-// when space runs short: the id is what you navigate by.
-func (m *model) title() string {
+// titleLine reads tool · id · title. The view title is the first thing
+// dropped when space runs short: the id is what you navigate by.
+func (m *model) titleLine() string {
 	sep := sepStyle.Render("  ·  ")
 
 	name := titleStyle.Render("aldediggi")
@@ -686,41 +739,60 @@ func (m *model) title() string {
 	}
 
 	if cur.Title != cur.ID {
-		room := m.width - lipgloss.Width(line)
+		room := m.width - boxPad - lipgloss.Width(line)
 		if room > lipgloss.Width(sep)+lipgloss.Width(cur.Title) {
 			line += sep + descStyle.Render(cur.Title)
 		}
 	}
-	return lipgloss.NewStyle().MaxWidth(m.width).Render(line)
+	return line
 }
 
-// sidebarBorder brightens the divider on the side that has the keyboard, so
-// tab has something visible to show for itself.
-func (m *model) sidebarBorder() lipgloss.Style {
-	if m.focus == paneList {
-		return sidebarStyle.BorderForeground(lipgloss.Color("6"))
+// tabLabel names the content box's one tab: the view on screen. Drill-down
+// targets would join it as further tabs.
+func (m *model) tabLabel() string {
+	cur := m.selected()
+	if cur == nil {
+		return ""
 	}
-	return sidebarStyle.BorderForeground(lipgloss.Color("8"))
+	label := cur.Name
+	if label == "" {
+		label = cur.ID
+	}
+	return tabStyle.Render(" " + label + " ")
 }
 
-func (m *model) sidebar() string {
-	var b strings.Builder
+// contentLines is what the content frame holds: the pane, with the status
+// line pinned to the frame's bottom edge when there is one.
+func (m *model) contentLines() []string {
+	lines := strings.Split(m.pane(), "\n")
+	if status := m.statusLine(); status != "" {
+		inner := m.bodyBoxHeight() - 2
+		for len(lines) < inner-1 {
+			lines = append(lines, "")
+		}
+		lines = append(lines[:inner-1], status)
+	}
+	return lines
+}
+
+func (m *model) sidebarLines() []string {
+	var out []string
 	for i, e := range m.entries {
 		switch {
 		case e.view == nil:
 			if i > 0 {
-				b.WriteString("\n")
+				out = append(out, "")
 			}
-			b.WriteString(groupStyle.Render(e.label) + "\n")
+			out = append(out, groupStyle.Render(e.label))
 		case i == m.cursor && m.focus == paneList:
-			b.WriteString(cursorStyle.Render("▸ "+e.label) + "\n")
+			out = append(out, cursorStyle.Render("▸ "+e.label))
 		case i == m.cursor:
-			b.WriteString(dividerStyle.Render("▸ "+e.label) + "\n")
+			out = append(out, dividerStyle.Render("▸ "+e.label))
 		default:
-			b.WriteString("  " + e.label + "\n")
+			out = append(out, "  "+e.label)
 		}
 	}
-	return b.String()
+	return out
 }
 
 func (m *model) pane() string {
@@ -783,24 +855,60 @@ func (m *model) scrollable() bool {
 	return false
 }
 
+// helpKey is one entry of the key legend. Lower weights are dropped first
+// when the footer box runs out of room.
+type helpKey struct {
+	label  string
+	weight int
+}
+
 func (m *model) help() string {
+	var keys []helpKey
 	switch {
 	case m.filtering:
-		return helpStyle.Render("⏎ keep filter  ·  esc clear")
+		keys = []helpKey{{"⏎ keep filter", 1}, {"esc clear", 2}}
 	case m.running:
-		return helpStyle.Render("esc cancel  ·  q quit")
+		keys = []helpKey{{"esc cancel", 2}, {"q quit", 1}}
+	default:
+		if m.focus == paneList {
+			keys = []helpKey{{"⏎ run", 3}}
+		} else {
+			keys = []helpKey{{"␣ select", 3}, {"a all", 1}}
+		}
+		keys = append(keys,
+			helpKey{"↑↓ move", 1},
+			helpKey{"⇥ focus", 2},
+			helpKey{"/ filter", 2},
+			helpKey{"r reload", 1},
+			helpKey{"q quit", 4},
+		)
+		if m.scrollable() {
+			keys = append(keys, helpKey{"<> scroll", 1})
+		}
 	}
+	return helpStyle.Render(fitKeys(keys, m.contentWidth()))
+}
 
-	keys := []string{"↑↓ move", "⇥ focus", "/ filter", "r reload", "q quit"}
-	if m.focus == paneList {
-		keys = append([]string{"⏎ run"}, keys...)
-	} else {
-		keys = append([]string{"␣ select", "a all"}, keys...)
+// fitKeys joins the legend, shedding the lightest keys until it fits: a
+// clipped "q qui" helps no one, a shorter legend still does.
+func fitKeys(keys []helpKey, avail int) string {
+	for {
+		parts := make([]string, len(keys))
+		for i, k := range keys {
+			parts[i] = k.label
+		}
+		line := strings.Join(parts, "  ·  ")
+		if lipgloss.Width(line) <= avail || len(keys) <= 1 {
+			return line
+		}
+		drop := 0
+		for i, k := range keys {
+			if k.weight < keys[drop].weight {
+				drop = i
+			}
+		}
+		keys = append(keys[:drop], keys[drop+1:]...)
 	}
-	if m.scrollable() {
-		keys = append(keys, "<> scroll")
-	}
-	return helpStyle.Render(strings.Join(keys, "  ·  "))
 }
 
 // visibleOnly strips styling so tests can assert on what the user reads.
