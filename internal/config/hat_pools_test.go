@@ -39,9 +39,9 @@ func viewByID(t *testing.T, views []engine.View, id string) *engine.View {
 }
 
 // The shipped nodes.pools view, its drill-down and its mutation, run against
-// a fake kubectl. This is what keeps the jq in examples/config.yaml honest:
+// a fake kubectl. This is what keeps the jq in the shipped hats honest:
 // the expressions here are the ones users copy.
-func TestExamplePoolsViewAndItsActions(t *testing.T) {
+func TestHatPoolsViewAndItsActions(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "pools.json"), []byte(poolsFixtureFull), 0o644); err != nil {
 		t.Fatal(err)
@@ -59,7 +59,7 @@ esac
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	views, err := Load("../../examples")
+	views, err := Load("../../hats/albedaran")
 	if err != nil {
 		t.Fatal(err)
 	}

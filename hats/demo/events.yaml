@@ -1,0 +1,64 @@
+# A second file in the same hat, to show two things: the menu groups by the
+# id, not by the file, and a view may open one declared elsewhere — actions
+# are linked once every file has been read.
+
+views:
+  # A calendar rather than a health list: ordered by when things happened,
+  # newest first. Ordering by severity would move rows about on every
+  # reload; what needs attention is picked out by colour instead.
+  - id: demo.events
+    title: What happened lately
+    refresh: 30s
+    source:
+      script: |
+        echo '[
+          {"at":"2026-08-20T07:31:00Z","service":"worker","level":"error",
+           "message":"liveness probe failed: connection refused"},
+          {"at":"2026-08-20T06:15:00Z","service":"worker","level":"warning",
+           "message":"restarting after crash"},
+          {"at":"2026-08-19T11:00:00Z","service":"api","level":"info",
+           "message":"scaled to 3 replicas"},
+          {"at":"2026-05-02T11:00:00Z","service":"cache","level":"info",
+           "message":"first start"}]'
+    # A bare JSON array is a stream of one value, so this needs no wrapping.
+    rows: .[]
+    key: '"\(.at)/\(.service)"'
+    columns:
+      - name: WHEN
+        expr: .at
+        format: timestamp
+      - name: AGO
+        expr: .at
+        format: age
+      - name: LEVEL
+        expr: .level
+        emphasis: { error: bad, warning: warn, info: good }
+      - name: SERVICE
+        expr: .service
+      - name: MESSAGE
+        expr: .message
+    sort:
+      - by: WHEN
+        order: desc
+    actions:
+      - key: enter
+        name: instances
+        short: Show that service's instances
+        open: demo.instances
+        args:
+          service: .service
+
+  # Deliberately broken, and worth shipping: this is what a hat looks like
+  # when an expression is wrong. The bad column renders !err and says so in
+  # a note under the table; the other columns and every row still work.
+  - id: demo.broken
+    title: What a broken expression looks like
+    source:
+      script: echo '[{"name":"api","labels":"not-an-object"}]'
+    rows: .[]
+    key: .name
+    columns:
+      - name: NAME
+        expr: .name
+      - name: LABELS
+        expr: .labels | keys

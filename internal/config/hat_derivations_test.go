@@ -50,7 +50,7 @@ func cellAt(t *testing.T, res engine.Table, row int, col string) string {
 // The six-way STATE fold is the derivation most easily got wrong: the
 // controller leaves several conditions True at once, and "Expired" is the
 // case no condition states at all.
-func TestExampleUpgradeJobsStateFold(t *testing.T) {
+func TestHatUpgradeJobsStateFold(t *testing.T) {
 	past := time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339)
 	future := time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339)
 
@@ -71,7 +71,7 @@ func TestExampleUpgradeJobsStateFold(t *testing.T) {
 
 	fakeKubectl(t, map[string]string{"jobs.json": jobs})
 
-	views, err := Load("../../examples")
+	views, err := Load("../../hats/albedaran")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestExampleUpgradeJobsStateFold(t *testing.T) {
 
 // Two derivations here: the synthetic pipeline verdict, and splitting
 // Alertmanager's one word "suppressed" into who suppressed it.
-func TestExampleAlertsFiringVerdictAndSuppression(t *testing.T) {
+func TestHatAlertsFiringVerdictAndSuppression(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	alerts := fmt.Sprintf(`[
 	  {"fingerprint":"f1","labels":{"alertname":"Watchdog"},"annotations":{},"startsAt":%q,
@@ -121,7 +121,7 @@ func TestExampleAlertsFiringVerdictAndSuppression(t *testing.T) {
 
 	fakeKubectl(t, map[string]string{"alerts.json": alerts})
 
-	views, err := Load("../../examples")
+	views, err := Load("../../hats/albedaran")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,10 +158,10 @@ func TestExampleAlertsFiringVerdictAndSuppression(t *testing.T) {
 
 // Without Watchdog the pipeline row says so — an empty alert list is
 // otherwise indistinguishable from a healthy quiet cluster.
-func TestExampleAlertsPipelineNoticesAMissingWatchdog(t *testing.T) {
+func TestHatAlertsPipelineNoticesAMissingWatchdog(t *testing.T) {
 	fakeKubectl(t, map[string]string{"alerts.json": `[]`})
 
-	views, err := Load("../../examples")
+	views, err := Load("../../hats/albedaran")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,10 +1,12 @@
 # rincewind
 
 Config-driven cluster diagnostic TUI.
-Views are defined in a YAML file: each view runs a script, reads a stream of
-JSON values from its stdout and shapes them into a table with jq
-expressions. Any command that prints JSON can feed a view — kubectl, curl,
-your own pipeline.
+Views are pulled out of a **hat**: a directory of YAML files.
+Each view runs a script,
+reads a stream of JSON values from its stdout
+and shapes them into a table with jq expressions.
+Any command that prints JSON can feed a view —
+kubectl, curl, your own pipeline.
 
 ```yaml
 views:
@@ -30,14 +32,15 @@ views:
         args: { app: .metadata.name }
 ```
 
-Actions come in two kinds, and both open a tab. `open:` navigates to another
-view, about the row under the cursor. `script:` does work — once per
-**selected** row, with values derived by jq reaching the script as
-environment variables, never templated into it.
+Actions come in two kinds, and both open a tab.
+`open:` navigates to another view, about the row under the cursor.
+`script:` does work — once per **selected** row,
+with values derived by jq reaching the script as environment variables,
+never templated into it.
 
-A working action opens its tab, collects any parameters it needs one field at
-a time, then shows the exact invocations it is about to make and asks
-underneath them:
+A working action opens its tab,
+collects any parameters it needs one field at a time,
+then shows the exact invocations it is about to make and asks underneath them:
 
 ```
 pause  infra
@@ -47,8 +50,9 @@ pause  infra
   machineconfigpool/infra patched
 ```
 
-So you confirm with the command in front of you, the output lands beside the
-call that produced it, and `esc` takes you back to the list untouched.
+So you confirm with the command in front of you,
+the output lands beside the call that produced it,
+and `esc` takes you back to the list untouched.
 
 ## Use
 
@@ -60,16 +64,18 @@ rincewind check                # validate the hat without starting the TUI
 
 In the TUI: `⏎` runs the view under the cursor, `⇥` focuses the output,
 `/` filters, `space`/`a` select rows, `r` reloads, `q` quits.
-In the output pane the view's own action keys apply — the box under the
-table says which. Drilling down opens a tab: `]`/`[` switch, `esc` or `x` closes one,
+In the output pane the view's own action keys apply —
+the box under the table says which.
+Drilling down opens a tab: `]`/`[` switch, `esc` or `x` closes one,
 and coming back finds the filter, cursor and scroll exactly as they were.
 Both panes scroll: `↑↓`, `⇞`/`⇟` by the screenful, `home`/`end` to the ends,
 and `<` `>` sideways through wide tables — the column names stay put.
 
-The mouse works too: the wheel scrolls whichever pane it points at, a click
-puts the cursor on a row, and clicking a menu entry runs it. Press `m` to
-release the mouse when you want the terminal's own text selection back for
-copying, and `m` again to take it back.
+The mouse works too: the wheel scrolls whichever pane it points at,
+a click puts the cursor on a row, and clicking a menu entry runs it.
+Press `M` to release the mouse
+when you want the terminal's own text selection back for copying,
+and `M` again to take it back.
 
 ## Build
 
@@ -82,4 +88,6 @@ make release      # static macOS and Linux binaries in dist/
 
 - [docs/architecture.md](docs/architecture.md) — pipeline, stdout contract,
   config schema, error philosophy, decisions
-- [examples/](examples/) — an example hat, one file per group
+- [hats/demo/](hats/demo/) — a hat that invents its own data:
+  no cluster, no kubectl.
+  Read it first when writing a hat of your own

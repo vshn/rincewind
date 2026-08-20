@@ -1,0 +1,127 @@
+# The demo hat needs no cluster and no kubectl: every view invents its own
+# data. It is what the tests are run against, and what to read first when
+# writing a hat of your own — between them these views use every part of the
+# schema.
+#
+#   rincewind -h hats/demo
+
+views:
+  # Two echo calls emit two JSON documents. The stdout contract is a *stream*
+  # of JSON values and `rows` runs over each, so a script can pull from
+  # several sources without merging them itself.
+  - id: demo.services
+    title: Demo services
+    source:
+      script: |
+        echo '{"items":[
+          {"name":"api","state":"Healthy","since":"2026-08-18T09:00:00Z","restarts":2,"replicas":3}]}'
+        echo '{"items":[
+          {"name":"worker","state":"Degraded","since":"2026-08-20T07:30:00Z","restarts":17,"replicas":2},
+          {"name":"cache","state":"Healthy","since":"2026-05-02T11:00:00Z","restarts":0,"replicas":1}]}'
+    rows: .items[]
+    key: .name
+    columns:
+      - name: NAME
+        expr: .name
+      - name: STATE
+        expr: .state
+        emphasis: { Healthy: good, Degraded: bad }
+      # Sorted numerically, not as text: 17 belongs after 2, not before it.
+      - name: RESTARTS
+        expr: .restarts
+      - name: REPLICAS
+        expr: .replicas
+      # The same value read two ways: a point in time to line up against a
+      # log line, and a span to see at a glance.
+      - name: SINCE
+        expr: .since
+        format: timestamp
+      - name: AGE
+        expr: .since
+        format: age
+    sort:
+      - by: STATE
+        rank: [Degraded, Healthy]
+      - by: RESTARTS
+        order: desc
+    actions:
+      - key: enter
+        name: instances
+        short: Show this service's instances
+        open: demo.instances
+        args:
+          service: .name
+
+      # Works on the selection, once per row, and asks first.
+      - key: t
+        name: restart
+        short: Restart the selected services
+        confirm: >-
+          "Restart \(map(.name) | join(", "))" +
+          "\n\nIn-flight requests are dropped; this is not a rolling restart."
+        env:
+          service: .name
+          replicas: .replicas
+        script: echo "restarted $service ($replicas replicas)"
+        reload: true
+
+      # Acts on nothing and asks for what it needs first: the create case.
+      - key: n
+        name: deploy
+        short: Deploy a new service
+        scope: none
+        params:
+          - name: service
+            short: what to call it
+            required: true
+          - name: image
+            short: image tag
+            default: latest
+        env:
+          # A rowless action's env works from $args, which is how a value is
+          # derived before the command is shown.
+          reference: '"\($args.service):\($args.image)"'
+        confirm: '"Deploy \($args.reference)"'
+        script: echo "deployed $reference"
+
+  # Needs a service, so it cannot be started from the menu — it is reached by
+  # drilling in, and the parameter reaches the script as $service.
+  - id: demo.instances
+    title: One service's instances
+    params:
+      - name: service
+        short: service name
+        required: true
+    source:
+      script: |
+        echo '{"items":[
+          {"id":"'"$service"'-1","node":"node-a","state":"Running","started":"2026-08-19T11:00:00Z"},
+          {"id":"'"$service"'-2","node":"node-b","state":"CrashLoopBackOff","started":"2026-08-20T06:15:00Z"},
+          {"id":"'"$service"'-3","node":"node-a","state":"Running","started":"2026-08-19T11:04:00Z"}]}'
+    rows: .items[]
+    key: .id
+    columns:
+      - name: ID
+        expr: .id
+      - name: NODE
+        expr: .node
+      - name: STATE
+        expr: .state
+        emphasis: { Running: good, CrashLoopBackOff: bad }
+      - name: STARTED
+        expr: .started
+        format: age
+    sort:
+      - by: STATE
+        rank: [CrashLoopBackOff, Running]
+      - by: ID
+    actions:
+      # The rows here are instances, so the service comes from the view's own
+      # parameter rather than from the row under the cursor.
+      - key: t
+        name: restart
+        short: Restart the whole service
+        scope: none
+        confirm: '"Restart the service \($args.service)"'
+        script: echo "restarted $service"
+        reload: true

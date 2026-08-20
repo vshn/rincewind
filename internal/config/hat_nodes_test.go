@@ -59,7 +59,7 @@ const poolsFixture = `{"items":[
 // TestExampleNodesView runs the shipped nodes.status view against a fake
 // kubectl, covering the whole pipeline: the script's jq pool join, the
 // column expressions and the trouble-first sort.
-func TestExampleNodesView(t *testing.T) {
+func TestHatNodesView(t *testing.T) {
 	if _, err := exec.LookPath("jq"); err != nil {
 		t.Skip("the nodes.status example needs jq on the PATH")
 	}
@@ -81,7 +81,7 @@ esac
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	views, err := Load("../../examples")
+	views, err := Load("../../hats/albedaran")
 	if err != nil {
 		t.Fatal(err)
 	}
