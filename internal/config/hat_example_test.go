@@ -7,11 +7,33 @@ import (
 	"github.com/vshn/rincewind/internal/engine"
 )
 
+func viewByID(t *testing.T, views []engine.View, id string) *engine.View {
+	t.Helper()
+	for i := range views {
+		if views[i].ID == id {
+			return &views[i]
+		}
+	}
+	t.Fatalf("example config lost the %s view", id)
+	return nil
+}
+
+func cellAt(t *testing.T, res engine.Result, row int, col string) string {
+	t.Helper()
+	for i, c := range res.Cols {
+		if c == col {
+			return res.Rows[row].Cells[i].Text
+		}
+	}
+	t.Fatalf("no column %q", col)
+	return ""
+}
+
 // demoHat loads the hat that invents its own data. It needs no cluster and
 // no kubectl, so these tests exercise the whole pipeline anywhere.
 func demoHat(t *testing.T) []engine.View {
 	t.Helper()
-	views, err := Load("../../hats/demo")
+	views, err := Load("../../example")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,41 +275,5 @@ func TestHatDemoTextViewKeepsItsLines(t *testing.T) {
 	// reason for the class.
 	if got := res.Lines[3]; !strings.HasPrefix(got, "    SELECT") {
 		t.Errorf("line 4 is %q, want its leading whitespace kept", got)
-	}
-}
-
-// The shipped log views are text, and reached the way the old tool reached
-// them: one from the menu, one by drilling in.
-func TestHatAlbedaranLogViews(t *testing.T) {
-	views, err := Load("../../hats/albedaran")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	mco := viewByID(t, views, "upgrade.logs")
-	if !mco.Listed() {
-		t.Error("upgrade.logs needs no parameter, so it belongs in the menu")
-	}
-	argo := viewByID(t, views, "argo.logs")
-	if argo.Listed() {
-		t.Error("argo.logs needs an application, so it must not be in the menu")
-	}
-
-	// Both apps and syncstatus can reach it, the latter from its own
-	// parameter because its rows are resources.
-	for _, from := range []string{"argo.apps", "argo.syncstatus"} {
-		v := viewByID(t, views, from)
-		found := false
-		for _, a := range v.Actions {
-			if a.Name == "logs" {
-				found = true
-				if a.Open == nil || a.Open.ID != "argo.logs" {
-					t.Errorf("%s: logs opens %+v", from, a.Open)
-				}
-			}
-		}
-		if !found {
-			t.Errorf("%s has no logs action", from)
-		}
 	}
 }

@@ -1,9 +1,9 @@
-# The demo hat needs no cluster and no kubectl: every view invents its own
+# The example hat needs no cluster and no kubectl: every view invents its own
 # data. It is what the tests are run against, and what to read first when
 # writing a hat of your own — between them these views use every part of the
 # schema.
 #
-#   rincewind -h hats/demo
+#   rincewind -h example
 
 views:
   # Two echo calls emit two JSON documents. The stdout contract is a *stream*

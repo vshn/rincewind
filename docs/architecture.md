@@ -455,16 +455,111 @@ so a clipped one is worse than none.
 No kubectl, or no current context, is not a cluster session;
 a probe that fails has nothing one could act on,
 and a broken cluster is reported by the views themselves.
-`hats/demo`, which invents its data, is the case to keep in mind:
+`example`, which invents its data, is the case to keep in mind:
 what is shown is the context the scripts *would* use,
 which is the truth a hat cannot override.
+
+## Getting a hat
+
+A hat is the product: sixteen views for one cluster,
+written once and useful to everyone who operates it.
+`rincewind hats` is how one travels from a repository to the store —
+`search`, `install`, `list`, `update`, `remove`.
+
+### A hat is code
+
+This outranks everything else in this section.
+A hat is a directory of shell scripts that this tool runs
+against your cluster, with your credentials, when you press a key.
+`rincewind hats install someone/their-hat` is `curl | sh` with a nicer noun,
+and the topic search makes that worse rather than better:
+**anyone can add a topic to their repository**,
+so the list is discovery, never curation.
+
+So the tool's own rule — *the command is on screen before it runs* —
+holds one level up as well:
+
+- `install` names the repository and where it will go,
+  says in one line that a hat is code that will run as you,
+  and asks. `--yes` is the way past it, for scripts.
+- `update` **fetches, shows `git diff --stat`, and asks** before moving anything.
+  A silent update of code that runs against a production cluster
+  is the worst version of this feature.
+- Nothing updates itself. No background fetch, no check on start.
+- `install` runs `config.Load` on every hat it found,
+  so a hat that does not load fails while you are installing it
+  rather than the first time you press a key.
+  One broken hat in a repository of five is named and the other four kept;
+  only when none loads is the clone removed again.
+
+### git, GitHub, and the two exceptions
+
+**Cloned with git**, not fetched as a tarball.
+The clone is what makes `git diff` and `git log` work on an installed hat
+afterwards, which is how one answers "what changed and who changed it"
+without this tool being involved.
+That makes git the second exception to the no-shelling-out rule,
+after the clipboard, and it is probed on `PATH` the same way.
+Full clones, not `--depth 1`: hats are YAML, the clone is tiny,
+and a shallow one breaks `pull --ff-only` after a force-push.
+
+**GitHub only**, which is the same exception the cluster probe makes for
+kubectl: a hat cannot say where hats are found,
+and the topic search exists nowhere else.
+`owner/repo` and a `github.com` URL are the two spellings accepted;
+anything else is refused by name rather than half-supported.
+
+`update` uses `pull --ff-only` and so **refuses on local modifications**.
+That is the point rather than a limitation —
+a change someone made to a hat is theirs —
+and the message points at `git -C <path> stash` for whoever wants to keep it.
+
+### The store is flat
+
+```
+~/.config/rincewind/
+  vshn-rincewind-hats/       ← the clone, named owner-repo
+    albedaran/
+```
+
+Flat, because the path is what goes into `RINCEWIND_HAT`
+and a person has to be able to read it back out of their own shell history.
+A directory holding `.git` is a clone; anything else in there is not,
+which lets the store stay an ordinary config directory.
+
+Where the store lives follows the same order the hat does:
+`--dir`, then `$RINCEWIND_HATS_DIR`, then `~/.config/rincewind`.
+The variable is spelled `_DIR` on purpose:
+`RINCEWIND_HATS` would be one letter from `RINCEWIND_HAT`
+and mean something entirely different —
+one picks the hat to run, the other says where clones land.
+
+### What counts as a hat in a repository
+
+Three layouts, tried in order, because each is what someone would write:
+
+- `hats/<name>/` — a repository that is something else as well,
+  the way this one holds its own hats beside the source;
+- `<name>/` at the root — a repository that is nothing but hats,
+  where a `hats/` level would only repeat the repository's own name;
+- `*.yaml` at the root — one repository, one hat.
+
+Dot directories are never hats: `.git` and `.github` both hold YAML.
 
 ## The hat
 
 The views are pulled out of a **hat**:
-the directory named by `--hat`/`-h`,
-else `$RINCEWIND_HAT`, else `~/.config/rincewind/`.
-Every `*.yaml` in it is read, in name order,
+the directory named by `--hat`/`-h`, else `$RINCEWIND_HAT`.
+There is no third step, and that is deliberate.
+`~/.config/rincewind/` used to be a hat itself and is now the store,
+which it cannot be both:
+a directory of hats is not a directory of views.
+Guessing one of the installed hats would be worse than asking,
+since which cluster one is pointed at
+is exactly what this tool should not decide quietly —
+so with neither given it refuses, naming both ways to choose
+and, when something is installed, the line to paste.
+Every `*.yaml` in the hat is read, in name order,
 which keeps one file per group —
 `argo.yaml`, `upgrade.yaml`, `nodes.yaml`, `alerts.yaml`.
 Actions are linked once every file has been read,
@@ -472,10 +567,11 @@ so a view may open one declared in another.
 Naming a single file works too, for a hat with one thing in it.
 
 One hat is one set of views,
-so a cluster that needs its own gets its own:
-`hats/albedaran` holds the views for that cluster,
-and `-h` says which hat to wear.
-`hats/demo` is the odd one out —
+so a cluster that needs its own gets its own —
+and since a hat travels, it gets its own repository too:
+the albedaran views live in `vshn/rincewind-hats`,
+installed with `rincewind hats install`.
+`example` stays here, and is the odd one out —
 every view in it invents its own data,
 so it runs anywhere and is what the tests are pointed at.
 
@@ -547,15 +643,16 @@ and only redraws when the tab comes forward.
 ## Layout
 
 ```
-cmd/               cobra wiring: root (TUI), check, --hat
+cmd/               cobra wiring: root (TUI), check, view, hats, --hat
 internal/
   config/          YAML → typed defs; schema validation; hands off to engine
   engine/          Def → compiled View; script runner, JSON stream decode,
                    gojq evaluation, sort, formats; Result/Row/Cell types,
                    and the line stream a followed view is read through
-  render/          Table → styled lines (style-after-layout)
+  hats/            the store: GitHub sources, clone scanning, git, search
+  render/          Result → styled lines (style-after-layout)
   tui/             bubbletea model: sidebar, table pane, filter, selection
-hats/              albedaran (a real cluster), demo (invents its data)
+example/           a hat that invents its data, and the config fixture
 ```
 
 ## TUI notes
@@ -670,6 +767,15 @@ hats/              albedaran (a real cluster), demo (invents its data)
 | No shelling out to jq/column/… from Go | Each has a Go replacement; scripts in a hat may do what they like |
 | …except the clipboard | OSC 52 was that replacement and Terminal.app does not implement it; NSPasteboard needs cgo and the build is static, so the premise fails and the rule yields rather than the feature |
 | The clipboard writer is probed on PATH | A Mac without pbcopy and a Wayland session without wl-copy both exist; the platform name answers a different question |
+| Hats are distributed, not vendored | A hat is the product; sixteen views for one cluster are useful to everyone who operates it, and cloning this repository to get them makes a hat something you have rather than something you can hand over |
+| `install` and `update` ask, and `update` shows the diff first | A hat is code that runs as you against your cluster; the rule that a command is on screen before it runs has to hold at install time too |
+| The topic search is discovery, not a registry | Anyone can add a topic to their repository, and presenting the result as blessed would be the lie that makes the rest dangerous |
+| Cloned with git, not fetched as a tarball | `git diff` and `git log` keep working on an installed hat afterwards, which is how "what changed" is answered without this tool |
+| git is the second exception to no-shelling-out | go-git is a large dependency for four commands, and having git there afterwards is the reason a clone beats a tarball |
+| GitHub only | The same exception the cluster probe makes for kubectl: a hat cannot say where hats are found, and the topic search exists nowhere else |
+| The store is flat, `owner-repo` | The path is what goes into `RINCEWIND_HAT`, and it has to be readable back out of a shell history |
+| `$RINCEWIND_HATS_DIR`, not `RINCEWIND_HATS` | One letter from `RINCEWIND_HAT` and a different meaning: one picks the hat, the other says where clones land |
+| No default hat beyond the variable | No config file, no symlink, no directory that doubles as a hat; the shell already scopes a variable to a project or a terminal |
 | The cluster comes from kubectl, not from the hat | A hat is a set of views; which cluster one is pointed at changes without any of them changing, and reading the same kubeconfig the scripts read is what makes the two agree |
 | The context, not reachability | Instant and local, where a round trip per view change would blank the display exactly when a cluster is unwell; running a view already proves whether it answers |
 | Re-probed when the view on screen changes | Once at startup goes stale the moment someone switches context in another terminal, and stale is worse than absent before a mutation |

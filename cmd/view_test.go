@@ -11,7 +11,7 @@ import (
 	"github.com/vshn/rincewind/internal/engine"
 )
 
-const demoHat = "../hats/demo"
+const demoHat = "../example"
 
 func demoViews(t *testing.T) []engine.View {
 	t.Helper()

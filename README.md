@@ -57,11 +57,26 @@ and `esc` takes you back to the list untouched.
 ## Use
 
 ```
-rincewind                      # TUI; views from the hat at ~/.config/rincewind/
-rincewind --hat ./hats/demo    # try it without a cluster (demo view included)
+rincewind hats search                  # find repositories of hats on GitHub
+rincewind hats install vshn/rincewind-hats
+export RINCEWIND_HAT=~/.config/rincewind/vshn-rincewind-hats/albedaran
+
+rincewind                      # TUI, on the hat above
+rincewind --hat ./example      # try it without a cluster, no install needed
 rincewind check                # validate the hat without starting the TUI
 rincewind view nodes.status    # print one view and exit, no TUI
 ```
+
+A hat is found with `-h`, else `$RINCEWIND_HAT`. There is no third step: with
+neither given, rincewind says so and lists what is installed, rather than
+guessing which cluster you meant.
+
+`hats install` clones into `~/.config/rincewind/` (or `--dir`, or
+`$RINCEWIND_HATS_DIR`), one flat directory per repository. `hats update`
+fetches, shows you the diff, and asks before applying it; `hats list` prints
+the paths. **A hat is shell scripts that run as you, against your cluster** —
+the topic search is discovery, not a registry, so read one before installing
+it.
 
 `view` writes a table column-aligned, a log verbatim, and a followed view as
 it streams. Colour is used only when the output is a terminal, so piping into
@@ -114,7 +129,7 @@ make release      # all four release binaries in dist/, without publishing
 
 - [docs/architecture.md](docs/architecture.md) — pipeline, stdout contract,
   config schema, error philosophy, decisions
-- [hats/demo/](hats/demo/) — a hat that invents its own data:
+- [example/](example/) — a hat that invents its own data:
   no cluster, no kubectl.
   Read it first when writing a hat of your own
 
