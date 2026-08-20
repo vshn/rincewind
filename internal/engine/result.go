@@ -196,7 +196,15 @@ type View struct {
 	Params  []Param
 	Actions []Action
 	Run     func(ctx context.Context, args Args) (Result, error)
+
+	// Stream is set instead of Run on a followed view: its output arrives as
+	// it is written rather than when the script exits. Cancelling the context
+	// kills the script, which is how one stops following.
+	Stream func(ctx context.Context, args Args) (<-chan Chunk, error)
 }
+
+// Follows reports whether the view streams rather than running once.
+func (v View) Follows() bool { return v.Stream != nil }
 
 // Bind resolves collected values against the declared parameters: the value
 // if given, else the default, else an error when the parameter is required.

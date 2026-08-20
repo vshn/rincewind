@@ -31,6 +31,7 @@ type view struct {
 	Title   string   `yaml:"title"`
 	Class   string   `yaml:"class"`
 	Refresh string   `yaml:"refresh"`
+	Follow  bool     `yaml:"follow"`
 	Params  []param  `yaml:"params"`
 	Source  source   `yaml:"source"`
 	Rows    string   `yaml:"rows"`
@@ -241,10 +242,21 @@ func toDef(v view) (engine.Def, error) {
 		return fail("class %q is not supported; use table or text", v.Class)
 	}
 
+	// Following is consuming the output as it is written, which only makes
+	// sense where the output is lines. A table would have to decide what a
+	// second document means for the rows already on screen.
+	switch {
+	case v.Follow && v.Class != "text":
+		return fail("follow needs class: text; a table has no way to grow a row at a time")
+	case v.Follow && v.Refresh != "":
+		return fail("follow and refresh exclude each other: a stream is already current")
+	}
+
 	d := engine.Def{
 		ID:     v.ID,
 		Title:  v.Title,
 		Text:   v.Class == "text",
+		Follow: v.Follow,
 		Shell:  v.Source.Shell,
 		Script: v.Source.Script,
 		Rows:   v.Rows,

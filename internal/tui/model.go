@@ -86,6 +86,15 @@ type jobMsg struct {
 	errs []error
 }
 
+// chunkMsg carries lines a followed view produced since the last one. The
+// seq names the tab, exactly as a finished run does.
+type chunkMsg struct {
+	seq   int
+	lines []string
+	end   bool
+	err   error
+}
+
 // refreshMsg re-runs a view with a refresh interval. It carries the seq of
 // the run it was scheduled after: a tick outlived by a newer run is stale.
 type refreshMsg struct {
@@ -134,6 +143,22 @@ type tab struct {
 	// in the background can reload on the way back instead of showing stale
 	// rows.
 	fetched time.Time
+
+	// stream is the channel a followed view's lines arrive on. It is set
+	// while following and cleared when the script ends or the tab is left:
+	// a stream pauses in the background, the way a refresh does, so there is
+	// never more than one script following.
+	stream <-chan engine.Chunk
+	// ended says the script stopped by itself rather than being cancelled —
+	// the pod went away, which is a finding worth showing. endErr is kept
+	// apart from err on purpose: err replaces the output, and the lines read
+	// before the stream broke are exactly what one wants to look at.
+	// stopped says following was ended by hand rather than by the script:
+	// being told "the stream ended" after pressing esc explains nothing one
+	// did not just do.
+	ended   bool
+	stopped bool
+	endErr  error
 
 	// job is set on a tab that runs an action rather than showing a view.
 	// A tab holds one or the other, never both.
@@ -406,9 +431,17 @@ func (m *model) stopAll() {
 // spinner tick chain lives as long as one does.
 func (m *model) anyRunning() bool {
 	for _, t := range m.tabs {
-		if t.running {
-			return true
+		if !t.running {
+			continue
 		}
+		// A followed view spins only until its first lines arrive. After
+		// that nothing is turning on screen, and a tick chain outliving its
+		// spinner would repaint ten times a second for as long as the log
+		// runs.
+		if t.stream != nil && t.res != nil && len(t.res.Lines) > 0 {
+			continue
+		}
+		return true
 	}
 	return false
 }
@@ -498,6 +531,35 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showResult()
 		}
 		return m, cmd
+
+	case chunkMsg:
+		t := m.tabBySeq(msg.seq)
+		if t == nil {
+			return m, nil
+		}
+
+		// Stay pinned to the end only if that is where the reader is; once
+		// they have scrolled up, new lines must not yank the view away.
+		follow := t == m.cur() && m.atBottom()
+		t.appendLines(msg.lines)
+
+		if msg.end {
+			// stop rather than dropping the cancel func: the script is gone,
+			// but its context still has to be released.
+			t.stop()
+			t.stream, t.running = nil, false
+			t.ended, t.endErr = true, msg.err
+		}
+		if t == m.cur() {
+			m.showResult()
+			if follow {
+				m.vp.GotoBottom()
+			}
+		}
+		if msg.end {
+			return m, nil
+		}
+		return m, m.readChunk(msg.seq, t.stream)
 
 	case refreshMsg:
 		// Only the tab on screen reloads on a tick: several tabs refreshing
@@ -614,6 +676,9 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "esc":
 		switch {
+		case m.cur().stream != nil:
+			m.stopFollow(m.cur())
+			m.showResult()
 		case m.cur().running:
 			m.cur().stop()
 		case m.filter.Value() != "":
@@ -881,10 +946,10 @@ func (m *model) jump(dir int) {
 	}
 }
 
-// follow scrolls the viewport just enough to keep the row cursor in sight,
+// followCursor scrolls the viewport just enough to keep the row cursor in sight,
 // stopping at the edge rather than recentring: a table that jumps under the
 // eye is harder to read than one that creeps.
-func (m *model) follow(cursor int) {
+func (m *model) followCursor(cursor int) {
 	if cursor < 0 {
 		return
 	}
@@ -997,6 +1062,10 @@ func (m *model) clampRow() {
 // menu is starting over, not drilling: every tab opened by an action goes.
 func (m *model) open() tea.Cmd {
 	m.closeFrom(1)
+	// The first tab is replaced rather than dropped, so its run has to be
+	// cancelled by hand — a followed one would otherwise keep a script alive
+	// with nothing left on screen to show for it.
+	m.tabs[0].stop()
 	m.tabs[0], m.act = newTab(m.selected(), nil), 0
 	m.filter.SetValue("")
 	m.focus = paneList
@@ -1024,6 +1093,11 @@ func (m *model) reload() tea.Cmd {
 func (m *model) launch(t *tab) tea.Cmd {
 	if t.view == nil {
 		return nil
+	}
+	// A followed view is never finished, so it takes the other path — and
+	// notably no deadline.
+	if t.view.Follows() {
+		return m.follow(t)
 	}
 
 	t.stop()
@@ -1086,6 +1160,7 @@ func (m *model) activate(i int) tea.Cmd {
 		return nil
 	}
 	m.park()
+	m.pauseStream(m.cur())
 
 	m.act = i
 	t := m.cur()
@@ -1120,7 +1195,18 @@ func (m *model) closeTab() tea.Cmd {
 // resume re-arms a returning tab's refresh, reloading at once when the data
 // aged past the interval while the tab sat in the background.
 func (m *model) resume(t *tab) tea.Cmd {
-	if t.view == nil || t.view.Refresh <= 0 || t.running {
+	if t.view == nil || t.running {
+		return nil
+	}
+	// A followed view was paused on the way out; start it again unless it
+	// had already ended by itself, which is a finding to leave on screen.
+	if t.view.Follows() {
+		if t.ended {
+			return nil
+		}
+		return m.follow(t)
+	}
+	if t.view.Refresh <= 0 {
 		return nil
 	}
 	if !t.fetched.IsZero() && time.Since(t.fetched) >= t.view.Refresh {
@@ -1192,7 +1278,10 @@ func (m *model) hasTable() bool {
 // hasText reports whether the content box is showing a text view's lines.
 func (m *model) hasText() bool {
 	t := m.cur()
-	return t.job == nil && t.err == nil && !t.running && t.res != nil && t.res.Text()
+	// A followed view has lines while it is still running, which is the
+	// whole point; only an error hides them.
+	return t.job == nil && t.err == nil && t.res != nil && t.res.Text() &&
+		(!t.running || t.stream != nil)
 }
 
 // statusLines is the room the status bar takes, so the viewport shrinks
@@ -1261,9 +1350,15 @@ func (m *model) showResult() {
 	// A text view's lines go in as they came out of the script: no header,
 	// no styling, no truncation. Whitespace is part of what is being read.
 	if vis.Text() {
+		lines := vis.Lines
+		// That a followed script stopped is itself a finding — the pod went
+		// away — so it is said under the last line rather than swallowed.
+		if t := m.cur(); t.ended {
+			lines = append(append([]string{}, lines...), m.endMarker(t))
+		}
 		m.head = ""
-		m.vp.SetContentLines(vis.Lines)
-		m.lines = len(vis.Lines)
+		m.vp.SetContentLines(lines)
+		m.lines = len(lines)
 		return
 	}
 
@@ -1286,7 +1381,18 @@ func (m *model) showResult() {
 
 	m.vp.SetContentLines(lines)
 	m.lines = len(lines)
-	m.follow(cursor)
+	m.followCursor(cursor)
+}
+
+// endMarker says why a followed view stopped producing.
+func (m *model) endMarker(t *tab) string {
+	switch {
+	case t.endErr != nil:
+		return errStyle.Render("— stream failed: " + t.endErr.Error() + " —  (r to start again)")
+	case t.stopped:
+		return dividerStyle.Render("— stopped —  (r to start again)")
+	}
+	return dividerStyle.Render("— stream ended —  (r to start again)")
 }
 
 // tableStyle paints emphasis, the row cursor and the selection. Emphasis
@@ -1542,7 +1648,10 @@ func (m *model) pane() string {
 	case m.cur().err != nil:
 		return errStyle.Render("error: " + m.cur().err.Error())
 
-	case m.cur().running:
+	case m.cur().running && m.cur().stream != nil && m.shownCount() == 0:
+		return fmt.Sprintf("%s following…", m.spin.View())
+
+	case m.cur().running && m.cur().stream == nil:
 		return fmt.Sprintf("%s running…", m.spin.View())
 
 	case m.cur().res == nil:
@@ -1617,7 +1726,8 @@ func (m *model) help() string {
 		keys = []helpKey{{"y confirm", 4}, {"any other key cancels", 1}}
 	case m.filtering:
 		keys = []helpKey{{"⏎ keep filter", 1}, {"esc clear", 2}}
-	case m.cur().running:
+	// A followed view is read while it runs, so it keeps the full legend.
+	case m.cur().running && m.cur().stream == nil:
 		keys = []helpKey{{"esc cancel", 2}, {"q quit", 1}}
 	default:
 		if m.focus == paneList {
@@ -1629,11 +1739,21 @@ func (m *model) help() string {
 			helpKey{"↑↓ move", 1},
 			helpKey{"⇥ focus", 2},
 			helpKey{"/ filter", 2},
-			helpKey{"r reload", 1},
 			helpKey{"q quit", 4},
 		)
+		// While a stream runs, esc stops it rather than going back, and
+		// reloading it is what stopping and starting again would be. The
+		// legend must not promise the other meanings.
+		if m.cur().stream != nil {
+			keys = append(keys, helpKey{"esc stop", 3})
+		} else {
+			keys = append(keys, helpKey{"r reload", 1})
+			if len(m.tabs) > 1 {
+				keys = append(keys, helpKey{"esc back", 4})
+			}
+		}
 		if len(m.tabs) > 1 {
-			keys = append(keys, helpKey{"][ tabs", 2}, helpKey{"esc back", 4})
+			keys = append(keys, helpKey{"][ tabs", 2})
 		}
 		if m.lines > m.vp.Height() {
 			keys = append(keys, helpKey{"⇞⇟ page", 2})

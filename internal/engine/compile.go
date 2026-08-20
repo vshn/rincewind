@@ -20,7 +20,10 @@ type Def struct {
 	Refresh time.Duration
 	// Text takes the script's stdout as lines rather than as JSON, which is
 	// what a log is. Rows, Key, Columns and Sort are then all empty.
-	Text    bool
+	Text bool
+	// Follow consumes that output as it is written instead of when the
+	// script exits. Only a text view may.
+	Follow  bool
 	Rows    string // jq: one stdout JSON value → row objects
 	Key     string // jq: row → identity; empty means no stable identity
 	Params  []Param
@@ -96,7 +99,11 @@ func Compile(d Def) (View, error) {
 
 	// A text view has no expressions at all: its output is the answer.
 	if d.Text {
-		return newView(d, cv.runText)
+		v, err := newView(d, cv.runText)
+		if err == nil && d.Follow {
+			v.Stream, v.Run = cv.runStream, nil
+		}
+		return v, err
 	}
 
 	var err error

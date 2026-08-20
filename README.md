@@ -64,6 +64,10 @@ rincewind check                # validate the hat without starting the TUI
 
 A view whose output is a log rather than a table is `class: text`:
 the lines arrive verbatim, `/` greps them, and the arrows scroll.
+Add `follow: true` and they arrive as the script writes them,
+with `esc` to stop and `r` to start again.
+Following pauses while its tab is in the background,
+so nothing keeps running behind a tab nobody is looking at.
 
 In the TUI: `⏎` runs the view under the cursor, `⇥` focuses the output,
 `/` filters, `space`/`a` select rows, `r` reloads, `q` quits.

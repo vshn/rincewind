@@ -202,6 +202,24 @@ func TestBrokenActionsFailWithContext(t *testing.T) {
 			yaml: strings.Replace(withActions, "      - key: p", "      - short: nothing binds this", 1),
 			want: []string{"demo.pools", "pause", "no key"},
 		},
+		{
+			name: "follow on a table",
+			yaml: strings.Replace(valid, "    rows: .items[]", "    follow: true\n    rows: .items[]", 1),
+			want: []string{"demo.list", "follow needs class: text"},
+		},
+		{
+			name: "follow with refresh",
+			yaml: `
+views:
+  - id: demo.list
+    class: text
+    follow: true
+    refresh: 30s
+    source:
+      script: echo hello
+`,
+			want: []string{"demo.list", "follow and refresh exclude each other"},
+		},
 	}
 
 	for _, tc := range cases {

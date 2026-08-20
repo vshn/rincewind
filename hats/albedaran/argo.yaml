@@ -150,15 +150,18 @@ views:
 
   # The application controller logs everything for every application at once,
   # so the only way to read it is filtered down to one. grep, not jq: these
-  # are lines, not JSON.
+  # are lines, not JSON. --line-buffered, because a pipe makes grep hold its
+  # output back in 4k blocks, and a followed log delivered in blocks is a
+  # followed log that looks stuck.
   - id: argo.logs
     title: Controller log lines about one application
     class: text
+    follow: true
     params:
       - name: app
         short: application name
         required: true
     source:
       script: |
-        kubectl -n syn logs sts/syn-argocd-application-controller --tail 5000 \
-          | { grep -F "$app" || true; }
+        kubectl -n syn logs -f sts/syn-argocd-application-controller --tail 5000 \
+          | { grep --line-buffered -F "$app" || true; }

@@ -218,6 +218,7 @@ views:
     title: Argo applications # description, shown in the title bar; default: id
     class: table             # optional; table (default) or text
     refresh: 30s             # optional auto-reload; manual r always works
+    follow: false            # optional; text only, and excludes refresh
     source:
       shell: [sh, -c]        # optional; this is the default
       script: |              # required
@@ -270,10 +271,51 @@ there is no selection, no sticky header,
 and a view of this class may only carry `scope: none` actions,
 since there is no cursor row to navigate from and no selection to work on.
 
-A text view is still a **snapshot**: the script runs, prints, and exits.
-The two shipped log views read `--tail 5000`, as their predecessors did.
-Following a log needs a streaming source,
-which the engine does not have — see the non-goals below.
+### Following
+
+`follow: true` consumes the script's output **as it is written**
+rather than when the script exits.
+Only a text view may:
+a table is sorted and column-aligned over the whole set,
+so it has no way to grow a row at a time.
+It rules out `refresh`, for the same reason a live thing is not polled.
+
+The engine keeps the two paths apart rather than blurring them.
+A snapshot view has a `Run` returning a `Result`;
+a followed view has a `Stream` returning a channel of `Chunk`s,
+and no `Run` at all.
+Nothing has to guess which it is holding.
+The chunks reach the TUI as messages,
+so the reading still happens outside `Update` like every other kind of work.
+
+Three consequences are worth stating,
+because each is a decision rather than a detail:
+
+- **Following pauses in the background**, the way a refresh does,
+  so there is never more than one script running per tab
+  and none at all behind a tab nobody is looking at.
+  Lines from the meantime are lost,
+  which is why a followed view passes something like `--tail`:
+  the source has to bring some of the past back when it starts again.
+- **A stream that stops says so.**
+  The script ending means the thing being followed went away,
+  which is a finding, not a malfunction —
+  it is reported under the last line, with `r` to start again.
+  Stopping it by hand with `esc` says something else,
+  since being told "the stream ended" would explain nothing one did not just do.
+- **What it keeps is capped**, at 5000 lines.
+  A log followed overnight would otherwise be a leak with a scrollbar.
+
+Everything else about a text view holds while it follows:
+the filter greps what has arrived, and the arrows scroll it.
+New lines pin the view to the bottom **only when it is already there** —
+a reader who has scrolled up is reading,
+and must not have the view yanked out from under them.
+
+The two shipped log views follow, and read `--tail 5000` on the way in.
+One of them pipes through `grep`, which needs `--line-buffered`:
+a pipe makes grep hold its output back in 4k blocks,
+and a followed log delivered in blocks is a followed log that looks stuck.
 
 ## The hat
 
@@ -367,7 +409,8 @@ cmd/               cobra wiring: root (TUI), check, --hat
 internal/
   config/          YAML → typed defs; schema validation; hands off to engine
   engine/          Def → compiled View; script runner, JSON stream decode,
-                   gojq evaluation, sort, formats; Table/Row/Cell types
+                   gojq evaluation, sort, formats; Result/Row/Cell types,
+                   and the line stream a followed view is read through
   render/          Table → styled lines (style-after-layout)
   tui/             bubbletea model: sidebar, table pane, filter, selection
 hats/              albedaran (a real cluster), demo (invents its data)
@@ -446,6 +489,11 @@ hats/              albedaran (a real cluster), demo (invents its data)
 
 | Decision | Reason |
 |---|---|
+| Following is text-only | A table is sorted and column-aligned over the whole set, so it has no way to grow a row at a time |
+| A followed view has a `Stream` and no `Run` | Two return shapes behind one field would leave every caller guessing which it holds |
+| Following pauses with its tab in the background | One script per tab, none behind a tab nobody is looking at; the `--tail` a real view passes brings the recent past back on return |
+| A stream that ends says so, and says it differently from one stopped by hand | The script ending means the thing being followed went away, which is a finding; being told that after pressing esc would explain nothing one did not just do |
+| New lines pin to the bottom only from the bottom | A reader who has scrolled up is reading |
 | A text view keeps its lines verbatim | Collapsing whitespace or padding a column would destroy the indentation a log is read by; that is why it is a class of its own rather than a one-column table |
 | A text view refuses rows, columns, sort and key | Accepting a field nothing reads teaches the wrong thing about the schema |
 | Views are config, not Go | The tool's owner wants to add views without recompiling; the error-message cost is paid explicitly (see above) |
