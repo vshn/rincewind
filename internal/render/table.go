@@ -5,7 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/vshn/aldediggi/internal/catalog"
+	"github.com/vshn/aldediggi/internal/engine"
 )
 
 // gutter is the space between columns.
@@ -21,17 +21,14 @@ type Style struct {
 	// selection can override the emphasis colours for that one row. Painting
 	// over a finished line instead would not work: the reset codes inside it
 	// end the highlight partway across.
-	Cell func(row int, e catalog.Emphasis, s string) string
+	Cell func(row int, e engine.Emphasis, s string) string
 }
 
 // Table lays a table out as lines, header first. Columns are as wide as their
 // widest cell and nothing is cut: a diagnostic tool that hides the end of a
 // message is worse than one you have to scroll. The terminal wraps, and the TUI
 // scrolls sideways.
-//
-// One renderer for both modes, so the CLI and the TUI cannot disagree about
-// where a column ends.
-func Table(t catalog.Table, style Style) []string {
+func Table(t engine.Table, style Style) []string {
 	widths := layout(t)
 
 	out := make([]string, 0, len(t.Rows)+1)
@@ -43,26 +40,30 @@ func Table(t catalog.Table, style Style) []string {
 	}))
 
 	for i, row := range t.Rows {
-		out = append(out, join(row.Cells, widths, func(_ int, cell string) string {
+		cells := make([]string, len(row.Cells))
+		for c := range row.Cells {
+			cells[c] = row.Cells[c].Text
+		}
+		out = append(out, join(cells, widths, func(c int, cell string) string {
 			if style.Cell == nil {
 				return cell
 			}
-			return style.Cell(i, t.EmphasisOf(strings.TrimSpace(cell)), cell)
+			return style.Cell(i, row.Cells[c].Emph, cell)
 		}))
 	}
 	return out
 }
 
 // layout sizes each column to its widest cell.
-func layout(t catalog.Table) []int {
+func layout(t engine.Table) []int {
 	widths := make([]int, len(t.Cols))
 	for i, c := range t.Cols {
 		widths[i] = lipgloss.Width(c)
 	}
 	for _, row := range t.Rows {
 		for i, cell := range row.Cells {
-			if i < len(widths) && lipgloss.Width(cell) > widths[i] {
-				widths[i] = lipgloss.Width(cell)
+			if i < len(widths) && lipgloss.Width(cell.Text) > widths[i] {
+				widths[i] = lipgloss.Width(cell.Text)
 			}
 		}
 	}

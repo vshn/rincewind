@@ -1,178 +1,191 @@
 # Architecture
 
-## Vocabulary
+## One pipeline per view
 
-A **view** produces output (`nodes status`).
-An **action** does something from a view (`--action pause`).
-Actions belong to a view and never stand alone,
-so nothing operates blindly on a selector — you see the set before you touch it.
-
-## Two modes, one definition
-
-- **`aldediggi`** starts the TUI: views on the left,
-  output on the right, the view's actions underneath.
-- **`aldediggi argo apps`** prints just the output.
-- **`aldediggi argo apps --action pause`** runs an action on that same view.
-
-Both modes are generated from one registry; a view is defined once.
-
-## View registry
-
-One registry is the single source of truth — never maintained separately:
+Every view in the config file describes the same pipeline:
 
 ```
-           ┌─ cobra commands     (aldediggi nodes status)
-registry ──┼─ TUI list           (left pane)
-           ├─ completion         (aldediggi completion zsh)
-           └─ docs/inventory.md  (generated, checked by a test)
+script  →  JSON value stream  →  rows expression  →  column projection  →  sort  →  table
+(any command)   (stdout)            (jq)                (jq per column)   (declarative)
 ```
 
-A view carries: id (`nodes.status`), group, description,
-kind, parameters, its actions, and something runnable.
-Views are Go builtins;
-a declarative config source was considered and **deliberately not built**: the engine came out at roughly the cost of writing every view by hand,
-and typed structs give errors like `application "x" not found` where a generic expression engine gives a stack of nils.
-`Registry.Merge` keeps the door open — a config source would be one more merge.
+The engine knows nothing about kubectl. It knows "run this script, expect
+JSON on stdout" — every piece of domain knowledge lives in the config file.
 
-## Anatomy of a view
+## The stdout contract
 
-A snapshot view is fetch → shape → `Table`.
-The fetch is `catalog.fetch[T]`,
-the single read path: `kubectl get … -o json`, the list-or-single asymmetry,
-the kind guard and keeping the raw document all live there, so a view states its read as one call.
-Shaping — columns, sort order, emphasis — stays ordinary Go next to the view,
-because it is domain, not presentation.
-Presentation begins where the `Result` is handed to render/tui.
+A source's stdout is a **stream of JSON values**, not exactly one document.
+The `rows` expression runs over each value in the stream and the results are
+concatenated — exactly jq's semantics, where a program runs once per input
+document. That makes multi-source views trivial:
 
-## View kinds
+```yaml
+source:
+  script: |
+    kubectl get applications -A -o json
+    curl -sf https://example.test/api/v1/things
+rows: .items[]
+```
 
-| Kind | Behaviour | Status |
-|---|---|---|
-| `snapshot` | run once, render result | everything built so far |
-| `stream` | long-running, cancellable | pending: following logs |
-| `external` | side effects outside the terminal | pending: `argo ui` |
+A single document is just the stream of length one. Scripts that need real
+merging (joins, enrichment) are free to use `jq` themselves — the
+no-shelling-out rule below binds this tool's Go code, not user scripts.
 
-There is no `mutate` kind.
-Mutation is a property of an action, not of a view.
+## Sources are scripts
 
-## Actions
+`source.script` is the only source form. It runs through `sh -c` by default —
+POSIX sh from `PATH`, never a hardcoded bash: Alpine has no bash, NixOS has
+no fixed path. Who wants bashisms or `pipefail` overrides per view:
 
-An action operates on **what the view is showing**: the result,
-minus the filter, minus the selection.
-In the TUI the selection is the highlighted row once the output pane has focus;
-on the command line it is the view's parameter.
-Both modes therefore reach the same two cases:
+```yaml
+source:
+  shell: [bash, -euo, pipefail, -c]
+  script: |
+    ...
+```
 
-| | TUI | CLI |
-|---|---|---|
-| one | tab into the table, pick a row | `argo apps root --action pause` |
-| several | `/` filter | `argo apps --action pause` |
+Worth knowing: in POSIX sh, `a | b` reports `b`'s exit status, so a failing
+left end goes unnoticed. Use the bash override with `pipefail` when that
+matters.
 
-Its input is the rows the view produced — filtered and sorted — re-serialised.
-Not the raw command output and not the rendered table:
+When views grow parameters (not built yet), they will be passed as
+**environment variables**, never templated into the script text — splicing
+user input into code is an injection hole; an environment variable is not.
 
-- the raw output behind a filtered view is *everything in the cluster*;
-  feeding it to an action would act on the cluster, not on the screen
-- the rendered table is lossy,
-  so a cosmetic column change would silently alter what an action operates on
+## Expressions are jq
 
-Serialised as a kubectl `List`,
-`kubectl patch -f -` then touches exactly the rows that were on screen — no selector that can match something else.
+`rows`, `key` and every column `expr` are jq programs, executed with
+[gojq](https://github.com/itchyny/gojq) — pure Go, nothing shells out.
+Expressions can be developed against real command output with real jq and
+pasted into the config unchanged.
 
-An action that returns `Navigate` moves to another view instead of reporting.
-The TUI pushes the target onto a stack that `esc` unwinds; the CLI runs it and prints.
-One Run signature covers both.
+## Config schema
 
-Consequences worth stating:
+```yaml
+views:
+  - id: argo.apps            # unique, required; the part before the first
+                             # dot groups the sidebar, the rest is the menu
+                             # label — an id without a dot is ungrouped
+    title: Argo applications # description, shown in the title bar; default: id
+    class: table             # optional; only "table" exists so far
+    refresh: 30s             # optional auto-reload; manual r always works
+    source:
+      shell: [sh, -c]        # optional; this is the default
+      script: |              # required
+        kubectl get applications -A -o json
+    rows: .items[]           # jq: one stdout value → row objects; required
+    key: .metadata.name      # jq: row identity; optional but recommended
+    columns:                 # required, at least one
+      - name: SYNC
+        expr: .status.sync.status
+        emphasis: { Synced: good, OutOfSync: bad, Unknown: warn }
+        format: ""           # "" | timestamp | age
+    sort:                    # optional, multi-key, stable
+      - by: SYNC
+        rank: [OutOfSync, Unknown, Synced]   # rank xor order
+      - by: NAME             # order: asc (default) | desc
+```
 
-- Confirmations name the count ("Pause 14 applications?") and the cluster.
-  The engine adds the cluster, not each action, so it cannot be forgotten.
-- The selected row is highlighted without its emphasis colours: a highlight has to survive the whole line,
-  and the reset at the end of a coloured cell would cut it short.
+Semantics that are easy to get wrong:
 
-## Sorting
+- **Sorting compares the raw jq values**, before formatting: numbers sort
+  numerically, RFC 3339 timestamps chronologically. `rank` lists values from
+  worst to best; anything unlisted sorts last.
+- **Emphasis matches the raw value**, before formatting, per column — the
+  same value may mean different things in different columns.
+- **`key` names a row across reloads.** The selection is keyed by it; without
+  a key expression the rendered cells stand in, and a reload that changes the
+  display can lose the selection.
+- **Formats pass unparseable values through** instead of hiding them.
 
-Two shapes of view, two orders:
+The config lives at `~/.config/aldediggi/config.yaml`, overridable with
+`--config`/`-c` or `$ALDEDIGGI_CONFIG`.
 
-- **Scheduled events** — upgrade jobs, suspensions — sort by time, latest first.
-  They are a calendar; ordering by state would move rows on every reload.
-  What needs attention is picked out by colour.
-  The one exception is a suspension in force right now,
-  pinned to the top, because that is the question its view exists to answer.
-- **Objects with a health state** — applications, nodes,
-  pools — sort by trouble: broken before healthy, then by name.
-  The broken ones are what the view is opened for.
+## Errors: the price of a config engine, paid deliberately
 
-## Times
+The previous incarnation of this tool kept views as Go builtins because
+"typed structs give errors like `application "x" not found` where a generic
+expression engine gives a stack of nils". Reversing that decision means
+answering it:
 
-Points in time are shown as timestamps (`2026-08-18 11:48`), spans as durations (`9h`, `2d1h`).
-A relative age cannot be lined up against a log line or another view's column,
-and correlating those is most of what this tool is for.
-
-Wall-clock input becomes RFC 3339 in exactly one place,
-`catalog.ParseTime` / `catalog.FormatTime`; nothing else formats a timestamp for an API.
+1. **Load-time validation.** Every expression is compiled at startup, sort
+   keys are checked against column names, ids for uniqueness, enums for
+   their values; unknown YAML fields are rejected with a line number. A typo
+   dies before any script runs, naming the view and the field.
+   `aldediggi check` runs just this.
+2. **Runtime failures are per cell, not per view.** A column expression that
+   errors renders `!err` in that cell and one note below the table; the
+   other columns and rows stay usable.
+3. **Script failures show the script's stderr**, not a Go stack: the
+   script's own message is the useful one.
 
 ## Results are data, not text
 
-`Run` never returns a formatted string.
-It returns `Table` (columns plus rows;
-rows carry their raw source documents), `Text` (plain lines) or `Navigate`.
-A `Stream` type joins them with the stream kind.
-The CLI and the TUI render the same values,
-which is what keeps the two modes from growing separate code paths.
+A view's `Run` returns a `Table` — columns, rows with their raw source
+objects and identity keys, notes. Rendering to styled lines happens in
+`internal/render`, in exactly one place, styling only after the layout is
+fixed: escape sequences count towards the width of everything that measures
+naively (text/tabwriter, bubbles/table), which is why cells never contain
+escape codes and why the table widget is not `bubbles/table`.
+
+## Selection
+
+The table view selects rows independently of whether anything acts on them:
+`space` toggles, `a` toggles everything the filter left, `esc` clears. The
+selection is a set of row **keys**, so it survives reloads and re-sorting;
+keys that vanish from the result are pruned. When actions return, the rule
+is: an action's input is the selection if there is one, otherwise all
+filtered rows — always what the user can see, never the raw stream.
 
 ## Layout
 
 ```
-cmd/          cobra wiring; the generated-inventory test
+cmd/               cobra wiring: root (TUI), check, --config
 internal/
-  catalog/    domain: View, Action, Registry, Result; the builtin groups
-  kube/       kubectl invocation seam (exec + JSON decode)
-  render/     Table/Text → styled lines, shared by CLI and TUI
-  tui/        bubbletea model, panes, keymap
-docs/
+  config/          YAML → typed defs; schema validation; hands off to engine
+  engine/          Def → compiled View; script runner, JSON stream decode,
+                   gojq evaluation, sort, formats; Table/Row/Cell types
+  render/          Table → styled lines (style-after-layout)
+  tui/             bubbletea model: sidebar, table pane, filter, selection
+examples/          shipped example config, kept green by a test
 ```
-
-`internal/kube` exists so a later move to client-go touches one package instead of every action.
 
 ## TUI notes
 
-- Bubbletea **v2**,
-  imported from `charm.land/bubbletea/v2` (not the old `github.com/charmbracelet/…` path,
-  which fails for v2).
-  Same for `charm.land/bubbles/v2` and `charm.land/lipgloss/v2`.
-- `Update` never blocks.
-  Every kubectl call is a `tea.Cmd`.
-- Streams (pending) use a goroutine feeding a channel plus the recursive "await next message" pattern — not `tea.Exec`,
-  which suspends the TUI.
-  Line buffers are bounded.
-- Background processes (port-forward,
-  pending) are bound to the model lifecycle and killed on quit, not to a shell trap.
+- Bubbletea **v2**, imported from `charm.land/bubbletea/v2` (the
+  `github.com/charmbracelet/…` path fails for v2). Same for bubbles and
+  lipgloss.
+- `Update` never blocks. Every script run is a `tea.Cmd`; a `seq` counter
+  discards results of superseded runs, and one spinner tick chain is kept
+  alive at a time.
+- The run timeout (30s) is the TUI's policy; the engine just honours ctx.
+- Tests drive `model.Update` with synthetic messages and assert on
+  `View().Content` — no terminal, no golden files. The fixture views are
+  built in memory; one of them sleeps, which is how the tests check that
+  the UI keeps painting while work is in flight.
 
 ## Non-goals
 
-- Managing clusters.
-  Anything beyond diagnosis stays with `kubectl`/`oc`.
-- Not a k9s replacement: read-mostly,
-  every mutation behind a confirmation that names the number of objects it touches.
+- Managing clusters. Anything beyond diagnosis stays with `kubectl`/`oc`.
 - Windows support.
-- Replacing `kubectl` as the API client (see [platform.md](platform.md)).
+- A plugin API. The config file plus arbitrary scripts is the extension
+  mechanism.
 
 ## Decisions
 
 | Decision | Reason |
 |---|---|
-| Registry as single source | Otherwise every command is maintained three times |
-| `Result` types, not strings | The only way CLI and TUI share one `Run` |
-| argv lists, not shell strings | Parameters come from user input; string interpolation is an injection hole |
-| `kubectl -o json` + Go structs, not client-go | CRDs would need generated clients; kubectl keeps kubeconfig, context and auth plugins working |
-| Actions hang off views, never standalone | A mutation should act on a set you have looked at |
-| Actions take the view's rows, not raw output | The raw output behind a filtered view is everything in the cluster |
-| Selection narrows, rather than being its own concept | The filter already did this; `--action` reaches the same cases through the view parameter |
-| Navigation is a result type | Keeps one Run signature; the TUI pushes it, the CLI runs it |
-| Confirmations state the count | A bulk mutation must name the number of objects before it runs |
-| Views are Go, not config | The engine costs about what writing every view costs, and loses the error messages |
-| Namespaces and `--as` are constants | Properties of the platform, not choices; a knob nobody turns is ballast |
-| Reads do not impersonate | Impersonation needs a verb not everyone has; requiring it for reads locks people out |
-| One table renderer for both modes | Styling after layout is the only way escape codes do not shift columns |
-| Tables are never truncated | A diagnostic tool that hides the end of a message is worse than one you scroll; the TUI scrolls sideways with `<` and `>` |
+| Views are config, not Go | The tool's owner wants to add views without recompiling; the error-message cost is paid explicitly (see above) |
+| Script is the only source form | One execution path; the config shows exactly what runs, shell choice included |
+| stdout is a JSON stream | Multi-source views without forcing the script to merge |
+| jq (gojq) as the only expression language | Users already know it; expressions are developed with real jq and pasted in |
+| Parameters as env vars, never templated (pending) | Splicing user input into script text is an injection hole |
+| Sort on raw values, before formatting | Rendered cells order neither numbers nor dates correctly |
+| Emphasis per column, on raw values | One value may mean different things in different columns |
+| Selection is a set of keys | Indices die on every reload; keys survive reordering |
+| `Run` returns data, never formatted strings | A string cannot be filtered, sorted or restyled |
+| One table renderer, styling after layout | Escape codes in cells misalign everything that measures naively |
+| Cell errors render `!err` + note, view survives | One broken expression must not take down 199 good rows |
+| No shelling out to jq/column/pbcopy/… from Go | Each has a Go replacement; user scripts may do what they like |
+| Probe capabilities, not `runtime.GOOS` | Environments lie less than platform names |
+| Never hardcode `/bin/bash` | Alpine has no bash; NixOS has no fixed path |

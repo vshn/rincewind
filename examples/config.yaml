@@ -1,0 +1,99 @@
+# Example view config. Try it without a cluster:
+#
+#   aldediggi -c examples/config.yaml
+#
+# The demo view synthesizes its rows; the others are real-world references
+# that need kubectl and a cluster.
+
+views:
+  # Cluster-free smoke test. Two echo calls emit two JSON documents — the
+  # stdout contract is a *stream* of JSON values, and `rows` runs over each,
+  # so a script can pull from several sources without merging them itself.
+  - id: demo/services
+    title: Demo services
+    group: demo
+    source:
+      script: |
+        echo '{"items":[{"name":"api","state":"Healthy","since":"2026-08-18T09:00:00Z","restarts":2}]}'
+        echo '{"items":[{"name":"worker","state":"Degraded","since":"2026-08-20T07:30:00Z","restarts":17},
+                        {"name":"cache","state":"Healthy","since":"2026-05-02T11:00:00Z","restarts":0}]}'
+    rows: .items[]
+    key: .name
+    columns:
+      - name: NAME
+        expr: .name
+      - name: STATE
+        expr: .state
+        emphasis: { Healthy: good, Degraded: bad }
+      - name: RESTARTS
+        expr: .restarts
+      - name: SINCE
+        expr: .since
+        format: timestamp
+      - name: AGE
+        expr: .since
+        format: age
+    sort:
+      - by: STATE
+        rank: [Degraded, Healthy]
+      - by: NAME
+
+  - id: argo/apps
+    title: Argo applications
+    group: argo
+    refresh: 30s
+    source:
+      script: |
+        kubectl get applications -A -o json
+    rows: .items[]
+    key: .metadata.name
+    columns:
+      - name: NAME
+        expr: .metadata.name
+      - name: SYNC
+        expr: .status.sync.status
+        emphasis: { Synced: good, OutOfSync: bad, Unknown: warn }
+      - name: HEALTH
+        expr: .status.health.status
+        emphasis: { Healthy: good, Degraded: bad, Progressing: warn, Missing: warn }
+      - name: AUTO
+        expr: 'if .spec.syncPolicy.automated then "auto" else "manual" end'
+      - name: REVISION
+        expr: .status.sync.revision[0:8]
+      - name: MESSAGE
+        expr: .status.conditions[0].message // ""
+    sort:
+      - by: SYNC
+        rank: [OutOfSync, Unknown, Synced]
+      - by: NAME
+
+  - id: nodes/status
+    title: Node status
+    group: nodes
+    source:
+      script: |
+        kubectl get nodes -o json
+    rows: .items[]
+    key: .metadata.name
+    columns:
+      - name: NAME
+        expr: .metadata.name
+      - name: STATUS
+        expr: >-
+          if ([.status.conditions[] | select(.type == "Ready")][0].status == "True")
+          then "Ready" else "NotReady" end
+        emphasis: { Ready: good, NotReady: bad }
+      - name: ROLES
+        expr: >-
+          [.metadata.labels | keys[]
+           | select(startswith("node-role.kubernetes.io/"))
+           | ltrimstr("node-role.kubernetes.io/")] | join(",")
+      - name: VERSION
+        expr: .status.nodeInfo.kubeletVersion
+      - name: AGE
+        expr: .metadata.creationTimestamp
+        format: age
+    sort:
+      - by: STATUS
+        rank: [NotReady, Ready]
+      - by: NAME

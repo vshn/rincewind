@@ -1,35 +1,51 @@
 # aldediggi
 
-TUI + CLI cluster diagnostic helper for OpenShift/Kubernetes.
-One definition per view serves both modes:
-`aldediggi` starts the TUI, a subcommand prints the same view, `--action` runs its actions.
-The only runtime dependency is `kubectl`.
+Config-driven cluster diagnostic TUI.
+Views are defined in a YAML file: each view runs a script, reads a stream of
+JSON values from its stdout and shapes them into a table with jq
+expressions. Any command that prints JSON can feed a view — kubectl, curl,
+your own pipeline.
+
+```yaml
+views:
+  - id: argo.apps
+    source:
+      script: |
+        kubectl get applications -A -o json
+    rows: .items[]
+    key: .metadata.name
+    columns:
+      - name: NAME
+        expr: .metadata.name
+      - name: SYNC
+        expr: .status.sync.status
+        emphasis: { Synced: good, OutOfSync: bad }
+    sort:
+      - by: SYNC
+        rank: [OutOfSync, Synced]
+```
 
 ## Use
 
 ```
-aldediggi                                # TUI: views left, output right, actions underneath
-aldediggi argo apps                      # the same view, plain output
-aldediggi argo apps root --action pause  # act on one application
-aldediggi upgrade suspensions --action create \
-  --name hotfix --reason "DB migration" --start "2026-08-18 20:00" --end +6h
+aldediggi                        # TUI; config from ~/.config/aldediggi/config.yaml
+aldediggi -c examples/config.yaml  # try it without a cluster (demo view included)
+aldediggi check                  # validate the config without starting the TUI
 ```
 
-Reads run as whoever is logged in.
-Mutations impersonate and ask first; `--yes` skips the prompt.
+In the TUI: `⏎` runs the view under the cursor, `⇥` focuses the output,
+`/` filters, `space`/`a` select rows, `r` reloads, `<` `>` scroll wide
+tables, `q` quits.
 
 ## Build
 
 ```
-make                           # lint, test, build
-make release                   # static macOS and Linux binaries in dist/
-make inventory                 # regenerate docs/inventory.md from the registry
+make              # lint, test, build
+make release      # static macOS and Linux binaries in dist/
 ```
 
 ## Docs
 
-- [docs/inventory.md](docs/inventory.md) — every view and action (generated)
-- [docs/views.md](docs/views.md) — what the views show and the decisions behind them
-- [docs/howto-add-view.md](docs/howto-add-view.md) — add a view, action or group
-- [docs/architecture.md](docs/architecture.md) — registry, view/action model, `Result` types, decisions
-- [docs/platform.md](docs/platform.md) — macOS/Linux handling
+- [docs/architecture.md](docs/architecture.md) — pipeline, stdout contract,
+  config schema, error philosophy, decisions
+- [examples/config.yaml](examples/config.yaml) — commented example views

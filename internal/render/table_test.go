@@ -6,17 +6,29 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/vshn/aldediggi/internal/catalog"
+	"github.com/vshn/aldediggi/internal/engine"
 )
 
-func sample() catalog.Table {
-	t := catalog.Table{
-		Cols:     []string{"NAME", "SYNC", "MESSAGE"},
-		Emphasis: map[string]catalog.Emphasis{"OutOfSync": catalog.Bad, "Synced": catalog.Good},
+func row(emphs []engine.Emphasis, cells ...string) engine.Row {
+	r := engine.Row{}
+	for i, c := range cells {
+		e := engine.Plain
+		if i < len(emphs) {
+			e = emphs[i]
+		}
+		r.Cells = append(r.Cells, engine.Cell{Text: c, Emph: e})
 	}
-	t.Add(nil, "cluster-tools", "OutOfSync", strings.Repeat("x", 80))
-	t.Add(nil, "root", "Synced", "")
-	return t
+	return r
+}
+
+func sample() engine.Table {
+	return engine.Table{
+		Cols: []string{"NAME", "SYNC", "MESSAGE"},
+		Rows: []engine.Row{
+			row([]engine.Emphasis{engine.Plain, engine.Bad}, "cluster-tools", "OutOfSync", strings.Repeat("x", 80)),
+			row([]engine.Emphasis{engine.Plain, engine.Good}, "root", "Synced", ""),
+		},
+	}
 }
 
 func TestColumnsStayAlignedAcrossRows(t *testing.T) {
@@ -36,7 +48,7 @@ func TestStylingDoesNotDisturbAlignment(t *testing.T) {
 	plain := Table(sample(), Style{})
 	styled := Table(sample(), Style{
 		Header: func(s string) string { return "\x1b[1m" + s + "\x1b[0m" },
-		Cell:   func(_ int, _ catalog.Emphasis, s string) string { return "\x1b[31m" + s + "\x1b[0m" },
+		Cell:   func(_ int, _ engine.Emphasis, s string) string { return "\x1b[31m" + s + "\x1b[0m" },
 	})
 
 	if len(plain) != len(styled) {
@@ -49,10 +61,10 @@ func TestStylingDoesNotDisturbAlignment(t *testing.T) {
 	}
 }
 
-func TestEmphasisIsLookedUpPerCell(t *testing.T) {
-	var seen []catalog.Emphasis
+func TestEmphasisReachesTheRightCell(t *testing.T) {
+	var seen []engine.Emphasis
 	Table(sample(), Style{
-		Cell: func(_ int, e catalog.Emphasis, s string) string {
+		Cell: func(_ int, e engine.Emphasis, s string) string {
 			seen = append(seen, e)
 			return s
 		},
@@ -61,9 +73,9 @@ func TestEmphasisIsLookedUpPerCell(t *testing.T) {
 	var bad, good int
 	for _, e := range seen {
 		switch e {
-		case catalog.Bad:
+		case engine.Bad:
 			bad++
-		case catalog.Good:
+		case engine.Good:
 			good++
 		}
 	}

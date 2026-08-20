@@ -1,9 +1,9 @@
-# Static binaries, as the tool ships. See docs/platform.md.
+# Static binaries, as the tool ships.
 BINARY := aldediggi
 DIST   := dist
 export CGO_ENABLED = 0
 
-.PHONY: all lint test build build-macos build-linux release inventory clean
+.PHONY: all lint test build build-macos build-linux release clean
 
 all: lint test build
 
@@ -28,10 +28,6 @@ build-linux:
 	GOOS=linux GOARCH=arm64 go build -trimpath -o $(DIST)/$(BINARY)-linux-arm64 .
 
 release: build-macos build-linux
-
-# docs/inventory.md is generated from the registry; the test fails while stale.
-inventory:
-	go test ./cmd -run TestInventory -update
 
 clean:
 	rm -rf $(DIST) $(BINARY)
