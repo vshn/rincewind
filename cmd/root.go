@@ -5,20 +5,28 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
 
 	"github.com/vshn/rincewind/internal/config"
+	"github.com/vshn/rincewind/internal/hats"
 	"github.com/vshn/rincewind/internal/tui"
 )
 
 // hatFlag names the hat: the directory the views are taken out of.
 var hatFlag string
+
+// envHat is the hat used when the flag is absent. There is no other default:
+// no config file, no symlink, no conventional directory that doubles as a
+// hat. One variable, which the shell already knows how to scope to a project
+// or a terminal.
+const envHat = "RINCEWIND_HAT"
 
 // version is stamped by the build (see the Makefile's ldflags); "dev" is
 // what a plain `go run .` shows.
@@ -32,7 +40,11 @@ var rootCmd = &cobra.Command{
 		"its stdout and shapes them into a table with jq expressions.",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		views, err := config.Load(hat())
+		path, err := hat()
+		if err != nil {
+			return err
+		}
+		views, err := config.Load(path)
 		if err != nil {
 			return err
 		}
@@ -52,31 +64,60 @@ var checkCmd = &cobra.Command{
 	Use:   "check",
 	Short: "Validate the hat without starting the TUI",
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		path := hat()
+		path, err := hat()
+		if err != nil {
+			return err
+		}
 		views, err := config.Load(path)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%s: %d views ok\n", path, len(views))
+		say(cmd.OutOrStdout(), "%s: %d views ok\n", path, len(views))
 		return nil
 	},
 }
 
 // hat resolves where the views are pulled from: the flag, then the
-// environment, then the conventional place. Every *.yaml in it is read, so
-// the views can be kept one file per group.
-func hat() string {
+// environment, and then nothing. Every *.yaml in it is read, so the views
+// can be kept one file per group.
+//
+// There is deliberately no fallback. ~/.config/rincewind used to be a hat
+// itself and is now the store, which cannot be both: a directory of hats is
+// not a directory of views. Guessing one of the installed hats would be
+// worse than asking, since which cluster one is pointed at is exactly the
+// thing this tool should not decide quietly.
+func hat() (string, error) {
 	if hatFlag != "" {
-		return hatFlag
+		return hatFlag, nil
 	}
-	if env := os.Getenv("RINCEWIND_HAT"); env != "" {
-		return env
+	if env := os.Getenv(envHat); env != "" {
+		return env, nil
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "."
+	return "", noHat()
+}
+
+// noHat is the first thing a new user sees, so it does the work: it names
+// both ways to choose one and, if anything is installed, the line to paste.
+func noHat() error {
+	var b strings.Builder
+	b.WriteString("no hat chosen\n\n" +
+		"  -h <path>                     for one run\n" +
+		"  export " + envHat + "=<path>   for every run\n")
+
+	store := hats.Store{Dir: hats.DefaultDir("")}
+	clones, err := store.List()
+	if err != nil || len(clones) == 0 {
+		b.WriteString("\nnothing is installed yet:\n\n  rincewind hats search\n  rincewind hats install <owner/repo>\n")
+		return errors.New(b.String())
 	}
-	return filepath.Join(home, ".config", "rincewind")
+
+	b.WriteString("\ninstalled:\n")
+	for _, c := range clones {
+		for _, h := range c.Hats {
+			fmt.Fprintf(&b, "  %s\n", short(h.Path))
+		}
+	}
+	return errors.New(b.String())
 }
 
 func init() {

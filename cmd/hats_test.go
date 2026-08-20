@@ -305,3 +305,59 @@ func TestShortenPath(t *testing.T) {
 		t.Errorf("a path outside home was rewritten to %q", got)
 	}
 }
+
+// The whole resolution: the flag, then the environment, then nothing.
+func TestHatResolution(t *testing.T) {
+	t.Setenv("RINCEWIND_HAT", "/from/env")
+	hatFlag = "/from/flag"
+	t.Cleanup(func() { hatFlag = "" })
+
+	if got, err := hat(); err != nil || got != "/from/flag" {
+		t.Errorf("got %q, %v; want the flag to win", got, err)
+	}
+
+	hatFlag = ""
+	if got, err := hat(); err != nil || got != "/from/env" {
+		t.Errorf("got %q, %v; want the environment", got, err)
+	}
+}
+
+// There is no fallback: ~/.config/rincewind is the store now, and a
+// directory of hats is not a directory of views.
+func TestNoHatSaysHowToChooseOne(t *testing.T) {
+	t.Setenv("RINCEWIND_HAT", "")
+	t.Setenv(hats.EnvDir, t.TempDir())
+	hatFlag = ""
+
+	_, err := hat()
+	if err == nil {
+		t.Fatal("a hat was found where none was chosen")
+	}
+	for _, want := range []string{"-h <path>", "RINCEWIND_HAT", "hats install"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error does not mention %q:\n%s", want, err)
+		}
+	}
+}
+
+// With something installed, the error is the line to paste.
+func TestNoHatNamesWhatIsInstalled(t *testing.T) {
+	store := t.TempDir()
+	repo := repoWith(t, "albedaran")
+	fromLocal(t, repo)
+	if out, err := runCmd(t, "", "hats", "-d", store, "-y", "install", repo); err != nil {
+		t.Fatal(err, out)
+	}
+
+	t.Setenv("RINCEWIND_HAT", "")
+	t.Setenv(hats.EnvDir, store)
+	hatFlag = ""
+
+	_, err := hat()
+	if err == nil {
+		t.Fatal("a hat was found where none was chosen")
+	}
+	if !strings.Contains(err.Error(), "albedaran") {
+		t.Errorf("the installed hat is not offered:\n%s", err)
+	}
+}

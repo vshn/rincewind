@@ -27,11 +27,15 @@ var viewCmd = &cobra.Command{
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeViews,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		views, err := config.Load(hat())
+		path, err := hat()
 		if err != nil {
 			return err
 		}
-		v, err := pick(views, args[0], hat())
+		views, err := config.Load(path)
+		if err != nil {
+			return err
+		}
+		v, err := pick(views, args[0], path)
 		if err != nil {
 			return err
 		}
@@ -131,7 +135,11 @@ func followView(ctx context.Context, out io.Writer, v engine.View) error {
 // load offers nothing rather than an error: completion is not the place to
 // report a broken config.
 func completeViews(*cobra.Command, []string, string) ([]cobra.Completion, cobra.ShellCompDirective) {
-	views, err := config.Load(hat())
+	path, err := hat()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	views, err := config.Load(path)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}

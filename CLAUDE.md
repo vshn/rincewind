@@ -121,13 +121,23 @@ Both kinds of action open a tab; `esc` closes it.
   A selection narrows the copy; no selection means all of it.
 - **No shelling out to `jq`, `column`, `nc`, `base64` or `sleep` from Go.**
   Each has a Go replacement.
-  The clipboard is the one exception, above, and it is an exception because
-  that premise is false there.
+  The clipboard and git are the exceptions, above, and both for the same
+  reason: that premise is false for them.
   Scripts in a hat may use whatever they like.
 - **Default shell is `sh` from PATH.**
   Never hardcode `/bin/bash`; per-view `source.shell` is the override.
 - **Parameters become environment variables**,
   never text templated into the script.
+- **A hat is code.** `hats install` asks before cloning and `hats update`
+  shows `git diff --stat` before applying;
+  the topic search is discovery, never a registry.
+  Do not add anything that fetches or updates by itself.
+- **`-h`, else `$RINCEWIND_HAT`, else refuse.**
+  `~/.config/rincewind` is the store, not a hat, and cannot be both.
+  Never guess one of the installed hats.
+- **git and GitHub are named in Go only in `internal/hats`**,
+  the second and third such exceptions after kubectl.
+  git is probed on `PATH`; clones are full, never `--depth 1`.
 - **`kubectl config current-context` is the one producer named in Go**,
   for the cluster shown top right, and nowhere else.
   Which cluster one is pointed at cannot come from the hat.
@@ -146,9 +156,10 @@ charm.land/bubbletea/v2   charm.land/bubbles/v2   charm.land/lipgloss/v2
 ## Layout
 
 ```
-cmd/          cobra wiring: root (TUI), check, --hat flag
+cmd/          cobra wiring: root (TUI), check, view, hats, --hat flag
 internal/
   config/     YAML → typed defs, schema validation → engine.Def
+  hats/       the store: GitHub source parsing, clone scanning, git, search
   engine/     Compile(Def) → View, Link resolves navigating actions;
               script runner, stream decode, gojq, sort, formats;
               Table/Row/Cell, Args/Param/Action
