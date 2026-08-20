@@ -74,16 +74,6 @@ func Head(ctx context.Context, dir string) string {
 	return out
 }
 
-// Origin is where a clone came from. Read from git rather than recorded in a
-// file of our own: choosing git bought the provenance for free.
-func Origin(ctx context.Context, dir string) string {
-	out, err := git(ctx, dir, "remote", "get-url", "origin")
-	if err != nil {
-		return ""
-	}
-	return out
-}
-
 // Incoming fetches and reports what an update would bring, as a diffstat
 // against what is checked out. Nothing is moved: this is the "show the
 // command before it runs" rule one level up, because the code being updated
@@ -114,17 +104,7 @@ func (s Store) Pull(ctx context.Context, dir string) error {
 	return err
 }
 
-// Remove deletes a clone, and any now-empty directories the slug created
-// above it, so an uninstalled owner does not linger as an empty shell.
+// Remove deletes a clone. Nothing to tidy above it: the store is flat.
 func (s Store) Remove(c Clone) error {
-	if err := os.RemoveAll(c.Path); err != nil {
-		return err
-	}
-	root := filepath.Join(s.Dir, reposDir)
-	for dir := filepath.Dir(c.Path); strings.HasPrefix(dir, root) && dir != root; dir = filepath.Dir(dir) {
-		if err := os.Remove(dir); err != nil {
-			return nil // not empty, which is the ordinary case
-		}
-	}
-	return nil
+	return os.RemoveAll(c.Path)
 }

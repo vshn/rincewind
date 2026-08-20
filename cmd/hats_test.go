@@ -79,6 +79,17 @@ views:
       - by: NOPE
 `
 
+// fromLocal makes the install command clone a repository on disk. Installing
+// is GitHub only, so the seam is how the command's own flow — ask, clone,
+// check, report — is covered without a network.
+func fromLocal(t *testing.T, dir string) {
+	t.Helper()
+	parseSource = func(string) (hats.Source, error) {
+		return hats.Source{URL: dir, Slug: "vshn-" + filepath.Base(dir)}, nil
+	}
+	t.Cleanup(func() { parseSource = hats.ParseSource })
+}
+
 // runCmd drives the real command tree, with the flags reset so one test
 // cannot leak its store into the next.
 func runCmd(t *testing.T, stdin string, args ...string) (string, error) {
@@ -105,6 +116,7 @@ func runCmd(t *testing.T, stdin string, args ...string) (string, error) {
 func TestHatsInstallListRemove(t *testing.T) {
 	store := t.TempDir()
 	repo := repoWith(t, "albedaran", "demo")
+	fromLocal(t, repo)
 
 	out, err := runCmd(t, "", "hats", "-d", store, "-y", "install", repo)
 	if err != nil {
@@ -124,7 +136,7 @@ func TestHatsInstallListRemove(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "local/"+filepath.Base(repo)) {
+	if !strings.Contains(out, "vshn-"+filepath.Base(repo)) {
 		t.Errorf("list does not name the clone:\n%s", out)
 	}
 
@@ -141,7 +153,10 @@ func TestHatsInstallListRemove(t *testing.T) {
 func TestInstallStopsWhenTheAnswerIsNo(t *testing.T) {
 	store := t.TempDir()
 
-	out, err := runCmd(t, "n\n", "hats", "-d", store, "install", repoWith(t, "demo"))
+	repo := repoWith(t, "demo")
+	fromLocal(t, repo)
+
+	out, err := runCmd(t, "n\n", "hats", "-d", store, "install", repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +175,10 @@ func TestInstallStopsWhenTheAnswerIsNo(t *testing.T) {
 func TestInstallNamesAHatThatDoesNotLoad(t *testing.T) {
 	store := t.TempDir()
 
-	out, err := runCmd(t, "", "hats", "-d", store, "-y", "install", repoWith(t, "broken", "demo"))
+	repo := repoWith(t, "broken", "demo")
+	fromLocal(t, repo)
+
+	out, err := runCmd(t, "", "hats", "-d", store, "-y", "install", repo)
 	if err != nil {
 		t.Fatalf("one broken hat took the whole install down: %v\n%s", err, out)
 	}
@@ -179,7 +197,10 @@ func TestInstallNamesAHatThatDoesNotLoad(t *testing.T) {
 func TestInstallRefusesARepositoryWithoutHats(t *testing.T) {
 	store := t.TempDir()
 
-	out, err := runCmd(t, "", "hats", "-d", store, "-y", "install", repoWith(t))
+	repo := repoWith(t)
+	fromLocal(t, repo)
+
+	out, err := runCmd(t, "", "hats", "-d", store, "-y", "install", repo)
 	if err == nil {
 		t.Fatalf("an empty repository was accepted:\n%s", out)
 	}
@@ -197,11 +218,12 @@ func TestInstallRefusesARepositoryWithoutHats(t *testing.T) {
 func TestUpdateShowsTheDiffAndCanBeDeclined(t *testing.T) {
 	store := t.TempDir()
 	repo := repoWith(t, "demo")
+	fromLocal(t, repo)
 	if out, err := runCmd(t, "", "hats", "-d", store, "-y", "install", repo); err != nil {
 		t.Fatal(err, out)
 	}
 
-	before := hats.Head(t.Context(), filepath.Join(store, "repos", "local", filepath.Base(repo)))
+	before := hats.Head(t.Context(), filepath.Join(store, "vshn-"+filepath.Base(repo)))
 
 	path := filepath.Join(repo, "hats", "demo", "views.yaml")
 	body, err := os.ReadFile(path)
@@ -224,7 +246,7 @@ func TestUpdateShowsTheDiffAndCanBeDeclined(t *testing.T) {
 	if !strings.Contains(out, "views.yaml") {
 		t.Errorf("the diff was not shown before the question:\n%s", out)
 	}
-	after := hats.Head(t.Context(), filepath.Join(store, "repos", "local", filepath.Base(repo)))
+	after := hats.Head(t.Context(), filepath.Join(store, "vshn-"+filepath.Base(repo)))
 	if after != before {
 		t.Error("the clone moved although the answer was no")
 	}

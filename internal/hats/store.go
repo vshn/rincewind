@@ -13,12 +13,9 @@ import (
 // that one picks the hat to run, this one says where clones land.
 const EnvDir = "RINCEWIND_HATS_DIR"
 
-// reposDir is the one subdirectory of the store. Everything git owns lives
-// under it, so the store can grow another kind of thing later without the
-// two becoming hard to tell apart.
-const reposDir = "repos"
-
-// Store is a directory of clones.
+// Store is a flat directory of clones: one directory per repository, named
+// owner-repo. Flat because the path is what goes into RINCEWIND_HAT, and a
+// person has to be able to read it back out of their own shell history.
 type Store struct{ Dir string }
 
 // DefaultDir is where the store lives when nothing says otherwise: the flag,
@@ -40,7 +37,7 @@ func DefaultDir(flag string) string {
 
 // Path is where a repository's clone goes.
 func (s Store) Path(src Source) string {
-	return filepath.Join(s.Dir, reposDir, filepath.FromSlash(src.Slug))
+	return filepath.Join(s.Dir, src.Slug)
 }
 
 // Hat is one hat found in the store: what to call it, and the path that goes
@@ -62,45 +59,49 @@ type Clone struct {
 // List reports what is installed, in a stable order. A store that does not
 // exist yet is not an error: it is the answer "nothing", which is what a
 // first run should hear.
+//
+// A clone is a directory holding .git. The store's own directory may hold
+// other things — it is a config directory — and they are simply not clones.
 func (s Store) List() ([]Clone, error) {
-	root := filepath.Join(s.Dir, reposDir)
-	if _, err := os.Stat(root); os.IsNotExist(err) {
+	entries, err := os.ReadDir(s.Dir)
+	if os.IsNotExist(err) {
 		return nil, nil
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	var out []Clone
-	// A clone is any directory holding .git, at whatever depth: the slug has
-	// three segments for GitHub and more for a forge with subgroups, so the
-	// marker is what says "stop here", not the depth.
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil || !d.IsDir() || path == root {
-			return err
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
 		}
-		if _, statErr := os.Stat(filepath.Join(path, ".git")); statErr != nil {
-			return nil
+		path := filepath.Join(s.Dir, e.Name())
+		if _, err := os.Stat(filepath.Join(path, ".git")); err != nil {
+			continue
 		}
-		slug := filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator)))
-		out = append(out, Clone{Slug: slug, Path: path, Hats: hatsIn(path, slug)})
-		return filepath.SkipDir
-	})
-	if err != nil {
-		return nil, err
+		out = append(out, Clone{Slug: e.Name(), Path: path, Hats: hatsIn(path, e.Name())})
 	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].Slug < out[j].Slug })
 	return out, nil
 }
 
-// Find locates one installed clone by slug, or by the owner/repo shorthand
-// that installed it.
+// Find locates one installed clone by its directory name, by the owner/repo
+// it was installed as, or by the repository name alone when that is not
+// ambiguous.
 func (s Store) Find(name string) (Clone, error) {
 	clones, err := s.List()
 	if err != nil {
 		return Clone{}, err
 	}
+	// owner/repo is how it was installed and how the search prints it, so it
+	// finds the clone as readily as the directory name does.
+	name = strings.ReplaceAll(strings.TrimSpace(name), "/", "-")
+
 	var hits []Clone
 	for _, c := range clones {
-		if c.Slug == name || strings.HasSuffix(c.Slug, "/"+name) {
+		if c.Slug == name || strings.HasSuffix(c.Slug, "-"+name) {
 			hits = append(hits, c)
 		}
 	}

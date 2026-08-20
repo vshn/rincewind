@@ -17,6 +17,11 @@ import (
 // hatsDirFlag overrides where the store lives.
 var hatsDirFlag string
 
+// parseSource is hats.ParseSource, behind a variable so the install command
+// can be exercised against a local repository. Nothing but a test replaces
+// it: installing is GitHub only, and that is the point of parsing at all.
+var parseSource = hats.ParseSource
+
 // yesFlag skips the questions, for scripts. Every question this command asks
 // is about running someone else's code, so the way past them is explicit.
 var yesFlag bool
@@ -72,7 +77,7 @@ var hatsInstallCmd = &cobra.Command{
 		"but git reaches whatever your credentials do.",
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		src, err := hats.ParseSource(args[0])
+		src, err := parseSource(args[0])
 		if err != nil {
 			return err
 		}

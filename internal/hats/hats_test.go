@@ -74,23 +74,18 @@ func commit(t *testing.T, dir, msg string) {
 
 func store(t *testing.T) Store { return Store{Dir: t.TempDir()} }
 
-// The three forms, and the two properties each has to produce.
+// The two spellings of the same GitHub repository, and the flat directory
+// name each has to produce.
 func TestParseSource(t *testing.T) {
 	cases := []struct {
 		in, url, slug string
 	}{
-		{"vshn/rincewind", "https://github.com/vshn/rincewind", "github.com/vshn/rincewind"},
-		{"vshn/rincewind.git", "https://github.com/vshn/rincewind", "github.com/vshn/rincewind"},
-		{"https://github.com/vshn/rincewind", "https://github.com/vshn/rincewind", "github.com/vshn/rincewind"},
-		// The URL goes to git as typed; only the path on disk normalises.
-		{"https://github.com/vshn/rincewind.git", "https://github.com/vshn/rincewind.git", "github.com/vshn/rincewind"},
-		// A private repository over ssh is the case the shorthand cannot reach.
-		{"git@github.com:vshn/private-hats.git", "git@github.com:vshn/private-hats.git", "github.com/vshn/private-hats"},
-		// A self-hosted forge with a subgroup keeps every segment.
-		{"https://git.vshn.net/team/infra/hats", "https://git.vshn.net/team/infra/hats", "git.vshn.net/team/infra/hats"},
-		// A repository already on disk: how a hat's author installs their own.
-		{"/srv/git/my-hats", "/srv/git/my-hats", "local/my-hats"},
-		{"file:///srv/git/my-hats.git", "file:///srv/git/my-hats.git", "local/my-hats"},
+		{"vshn/rincewind-hats", "https://github.com/vshn/rincewind-hats", "vshn-rincewind-hats"},
+		{"vshn/rincewind-hats.git", "https://github.com/vshn/rincewind-hats", "vshn-rincewind-hats"},
+		{"https://github.com/vshn/rincewind-hats", "https://github.com/vshn/rincewind-hats", "vshn-rincewind-hats"},
+		{"https://github.com/vshn/rincewind-hats.git", "https://github.com/vshn/rincewind-hats", "vshn-rincewind-hats"},
+		{"github.com/vshn/rincewind-hats", "https://github.com/vshn/rincewind-hats", "vshn-rincewind-hats"},
+		{"  vshn/rincewind-hats  ", "https://github.com/vshn/rincewind-hats", "vshn-rincewind-hats"},
 	}
 	for _, tc := range cases {
 		got, err := ParseSource(tc.in)
@@ -107,13 +102,15 @@ func TestParseSource(t *testing.T) {
 	}
 }
 
-// A slug becomes a path, so anything that could climb out of the store has
-// to die while it is still a string.
+// GitHub only, and a slug becomes a directory name — so anything naming
+// somewhere else, or naming nothing, dies while it is still a string.
 func TestParseSourceRefusals(t *testing.T) {
 	for _, in := range []string{
-		"", "rincewind", "vshn/", "vshn/rincewind/extra",
-		"https://github.com/vshn", "https://github.com/../../etc",
-		"file:///", "/",
+		"", "rincewind", "vshn/", "/rincewind", "vshn/hats/extra",
+		"https://gitlab.com/vshn/hats",
+		"git@github.com:vshn/hats.git",
+		"/srv/git/local", "file:///srv/git/local",
+		"https://github.com/../../etc", "vshn/..",
 	} {
 		if got, err := ParseSource(in); err == nil {
 			t.Errorf("%q was accepted as %+v", in, got)
@@ -123,7 +120,7 @@ func TestParseSourceRefusals(t *testing.T) {
 
 // The convention, demonstrated: one directory per hat under hats/.
 func TestCloneFindsTheHats(t *testing.T) {
-	src := Source{URL: upstream(t, "albedaran", "demo"), Slug: "example.test/vshn/hats"}
+	src := Source{URL: upstream(t, "albedaran", "demo"), Slug: "vshn-hats"}
 	s := store(t)
 
 	c, err := s.Clone(context.Background(), src)
@@ -172,7 +169,7 @@ func TestHatsAtTheRepositoryRoot(t *testing.T) {
 	run(t, dir, "config", "user.name", "Test")
 	commit(t, dir, "first")
 
-	c, err := store(t).Clone(context.Background(), Source{URL: dir, Slug: "github.com/vshn/rincewind-hats"})
+	c, err := store(t).Clone(context.Background(), Source{URL: dir, Slug: "vshn-rincewind-hats"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +196,7 @@ func TestCloneWithoutHatsDirectory(t *testing.T) {
 	commit(t, dir, "first")
 
 	s := store(t)
-	c, err := s.Clone(context.Background(), Source{URL: dir, Slug: "example.test/one/hat"})
+	c, err := s.Clone(context.Background(), Source{URL: dir, Slug: "one-hat"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +207,7 @@ func TestCloneWithoutHatsDirectory(t *testing.T) {
 
 // docs/ holds yaml and must not become a hat.
 func TestOnlyHatsDirectoryIsScanned(t *testing.T) {
-	src := Source{URL: upstream(t, "albedaran"), Slug: "example.test/vshn/hats"}
+	src := Source{URL: upstream(t, "albedaran"), Slug: "vshn-hats"}
 	c, err := store(t).Clone(context.Background(), src)
 	if err != nil {
 		t.Fatal(err)
@@ -224,7 +221,7 @@ func TestOnlyHatsDirectoryIsScanned(t *testing.T) {
 
 // Installing twice is a mistake worth naming rather than a silent no-op.
 func TestCloneRefusesToOverwrite(t *testing.T) {
-	src := Source{URL: upstream(t, "demo"), Slug: "example.test/vshn/hats"}
+	src := Source{URL: upstream(t, "demo"), Slug: "vshn-hats"}
 	s := store(t)
 	if _, err := s.Clone(context.Background(), src); err != nil {
 		t.Fatal(err)
@@ -239,14 +236,18 @@ func TestCloneRefusesToOverwrite(t *testing.T) {
 	}
 }
 
-// List walks to whatever depth the slug has, and Find takes the shorthand.
+// The store is flat, and Find takes any of the three spellings.
 func TestListAndFind(t *testing.T) {
 	s := store(t)
-	for _, slug := range []string{"github.com/vshn/rincewind", "git.vshn.net/team/infra/hats"} {
-		src := Source{URL: upstream(t, "demo"), Slug: slug}
-		if _, err := s.Clone(context.Background(), src); err != nil {
+	for _, slug := range []string{"vshn-rincewind-hats", "acme-cluster-hats"} {
+		if _, err := s.Clone(context.Background(), Source{URL: upstream(t, "demo"), Slug: slug}); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// Something in the store that is not a clone; a config directory holds
+	// other things and they are simply not repositories.
+	if err := os.MkdirAll(filepath.Join(s.Dir, "notes"), 0o755); err != nil {
+		t.Fatal(err)
 	}
 
 	clones, err := s.List()
@@ -256,12 +257,14 @@ func TestListAndFind(t *testing.T) {
 	if len(clones) != 2 {
 		t.Fatalf("listed %d clones, want 2: %+v", len(clones), clones)
 	}
-	if clones[0].Slug != "git.vshn.net/team/infra/hats" {
+	if clones[0].Slug != "acme-cluster-hats" {
 		t.Errorf("the listing is not sorted: %+v", clones)
 	}
 
-	if c, err := s.Find("vshn/rincewind"); err != nil || c.Slug != "github.com/vshn/rincewind" {
-		t.Errorf("Find by shorthand gave %+v, %v", c, err)
+	for _, name := range []string{"vshn-rincewind-hats", "vshn/rincewind-hats", "rincewind-hats"} {
+		if c, err := s.Find(name); err != nil || c.Slug != "vshn-rincewind-hats" {
+			t.Errorf("Find(%q) gave %+v, %v", name, c, err)
+		}
 	}
 	if _, err := s.Find("nope"); err == nil {
 		t.Error("Find accepted something that is not installed")
@@ -281,7 +284,7 @@ func TestListOfAnEmptyStore(t *testing.T) {
 func TestIncomingThenPull(t *testing.T) {
 	up := upstream(t, "demo")
 	s := store(t)
-	c, err := s.Clone(context.Background(), Source{URL: up, Slug: "example.test/vshn/hats"})
+	c, err := s.Clone(context.Background(), Source{URL: up, Slug: "vshn-hats"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +318,7 @@ func TestIncomingThenPull(t *testing.T) {
 func TestPullRefusesOverLocalChanges(t *testing.T) {
 	up := upstream(t, "demo")
 	s := store(t)
-	c, err := s.Clone(context.Background(), Source{URL: up, Slug: "example.test/vshn/hats"})
+	c, err := s.Clone(context.Background(), Source{URL: up, Slug: "vshn-hats"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,8 +350,9 @@ func TestRemoveCleansUpBehindItself(t *testing.T) {
 	if _, err := os.Stat(c.Path); !os.IsNotExist(err) {
 		t.Error("the clone is still there")
 	}
-	if _, err := os.Stat(filepath.Join(s.Dir, reposDir, "github.com", "vshn")); !os.IsNotExist(err) {
-		t.Error("an empty owner directory was left behind")
+	left, err := s.List()
+	if err != nil || len(left) != 0 {
+		t.Errorf("the store still lists %+v", left)
 	}
 }
 
