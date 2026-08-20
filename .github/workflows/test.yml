@@ -1,0 +1,25 @@
+name: Test
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+
+      # The hats run real scripts, so the tools they call must be here. jq is
+      # preinstalled on ubuntu-latest; the one test that needs it skips itself
+      # if that ever stops being true.
+      - name: Run tests
+        run: make test

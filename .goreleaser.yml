@@ -1,0 +1,46 @@
+# What ships, defined once. The Makefile's `release` target builds this same
+# matrix locally; the release workflow publishes it.
+#
+# Unlike the sibling project this is adapted from, there is no container
+# image: rincewind is a local TUI that calls kubectl and jq on your machine
+# and reads its hat off the disk, all of which would have to be passed into a
+# container.
+version: 2
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    # Both, and in that order: this is run from a laptop, and a release with
+    # no darwin binary would be useless to its own author.
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    # The same variable the Makefile stamps. Without it a released binary
+    # answers `rincewind version` with "dev".
+    ldflags:
+      - -s -w -X github.com/vshn/rincewind/cmd.version={{ .Version }}
+
+archives:
+  # A single static binary is the whole product; wrapping it in a tarball
+  # only adds a step between downloading and running it.
+  - formats: [binary]
+    name_template: "{{ .Binary }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+release:
+  prerelease: auto
+  # The archives are bare binaries, so nothing carries the licence with them.
+  # Apache 2.0 asks that recipients get a copy, so it is uploaded beside them
+  # rather than forcing an extraction step on everyone.
+  extra_files:
+    - glob: LICENSE

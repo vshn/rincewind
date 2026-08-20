@@ -1,0 +1,25 @@
+name: Lint
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+
+      # Not `make lint`: the action installs golangci-lint, caches it, and
+      # annotates the pull request inline. Both it and `make lint` read
+      # .golangci.yml, so they check the same set.
+      - name: Run linters
+        uses: golangci/golangci-lint-action@v7
