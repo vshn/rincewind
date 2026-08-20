@@ -16,6 +16,10 @@ import (
 
 var cfgFlag string
 
+// version is stamped by the build (see the Makefile's ldflags); "dev" is
+// what a plain `go run .` shows.
+var version = "dev"
+
 var rootCmd = &cobra.Command{
 	Use:   "aldediggi",
 	Short: "Cluster diagnostic TUI driven by a YAML view config",
@@ -28,7 +32,15 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return tui.Run(views)
+		return tui.Run(views, version)
+	},
+}
+
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Print the version",
+	Run: func(*cobra.Command, []string) {
+		fmt.Println(version)
 	},
 }
 
@@ -64,7 +76,7 @@ func configPath() string {
 
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&cfgFlag, "config", "c", "", "path to the view config file")
-	rootCmd.AddCommand(checkCmd)
+	rootCmd.AddCommand(checkCmd, versionCmd)
 }
 
 // Execute runs the root command. Errors are printed by cobra; printing them

@@ -1,6 +1,8 @@
 # Static binaries, as the tool ships.
-BINARY := aldediggi
-DIST   := dist
+BINARY  := aldediggi
+DIST    := dist
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -ldflags "-X github.com/vshn/aldediggi/cmd.version=$(VERSION)"
 export CGO_ENABLED = 0
 
 .PHONY: all lint test build build-macos build-linux release clean
@@ -17,15 +19,15 @@ test:
 	go test ./...
 
 build:
-	go build -o $(BINARY) .
+	go build $(LDFLAGS) -o $(BINARY) .
 
 build-macos:
-	GOOS=darwin GOARCH=arm64 go build -trimpath -o $(DIST)/$(BINARY)-darwin-arm64 .
-	GOOS=darwin GOARCH=amd64 go build -trimpath -o $(DIST)/$(BINARY)-darwin-amd64 .
+	GOOS=darwin GOARCH=arm64 go build -trimpath $(LDFLAGS) -o $(DIST)/$(BINARY)-darwin-arm64 .
+	GOOS=darwin GOARCH=amd64 go build -trimpath $(LDFLAGS) -o $(DIST)/$(BINARY)-darwin-amd64 .
 
 build-linux:
-	GOOS=linux GOARCH=amd64 go build -trimpath -o $(DIST)/$(BINARY)-linux-amd64 .
-	GOOS=linux GOARCH=arm64 go build -trimpath -o $(DIST)/$(BINARY)-linux-arm64 .
+	GOOS=linux GOARCH=amd64 go build -trimpath $(LDFLAGS) -o $(DIST)/$(BINARY)-linux-amd64 .
+	GOOS=linux GOARCH=arm64 go build -trimpath $(LDFLAGS) -o $(DIST)/$(BINARY)-linux-arm64 .
 
 release: build-macos build-linux
 
