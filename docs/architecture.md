@@ -455,7 +455,7 @@ so a clipped one is worse than none.
 No kubectl, or no current context, is not a cluster session;
 a probe that fails has nothing one could act on,
 and a broken cluster is reported by the views themselves.
-`hats/demo`, which invents its data, is the case to keep in mind:
+`example`, which invents its data, is the case to keep in mind:
 what is shown is the context the scripts *would* use,
 which is the truth a hat cannot override.
 
@@ -571,7 +571,7 @@ so a cluster that needs its own gets its own —
 and since a hat travels, it gets its own repository too:
 the albedaran views live in `vshn/rincewind-hats`,
 installed with `rincewind hats install`.
-`hats/demo` stays here, and is the odd one out —
+`example` stays here, and is the odd one out —
 every view in it invents its own data,
 so it runs anywhere and is what the tests are pointed at.
 
@@ -643,15 +643,16 @@ and only redraws when the tab comes forward.
 ## Layout
 
 ```
-cmd/               cobra wiring: root (TUI), check, --hat
+cmd/               cobra wiring: root (TUI), check, view, hats, --hat
 internal/
   config/          YAML → typed defs; schema validation; hands off to engine
   engine/          Def → compiled View; script runner, JSON stream decode,
                    gojq evaluation, sort, formats; Result/Row/Cell types,
                    and the line stream a followed view is read through
-  render/          Table → styled lines (style-after-layout)
+  hats/            the store: GitHub sources, clone scanning, git, search
+  render/          Result → styled lines (style-after-layout)
   tui/             bubbletea model: sidebar, table pane, filter, selection
-hats/              albedaran (a real cluster), demo (invents its data)
+example/           a hat that invents its data, and the config fixture
 ```
 
 ## TUI notes

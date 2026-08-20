@@ -167,10 +167,9 @@ internal/
   tui/        model.go   bubbletea model, tabs, keys, mouse
               action.go  firing actions, confirmation, drill
               frame.go   framed boxes, tab bar, action bar
-hats/         albedaran/  the views for that cluster — a real hat, not a
-                          sample; do not treat it as disposable
-              demo/       invents its own data, needs no cluster; this is
-                          what the tests run against
+example/      a hat that invents its own data, needs no cluster; this is
+              what the tests run against, and what to read first when
+              writing a hat
 docs/
 ```
 
@@ -179,10 +178,10 @@ docs/
 ```
 go build ./...
 go test ./...
-go run . -h hats/albedaran               # the albedaran cluster
-go run . -h hats/demo                    # invented data, no cluster needed
-go run . check -h hats/demo              # validate a hat
-go run . view demo.services -h hats/demo # print one view, no TUI
+go run . -h example                       # invented data, no cluster needed
+go run . check -h example                 # validate a hat
+go run . view demo.services -h example    # print one view, no TUI
+go run . hats search                      # find hats on GitHub
 CGO_ENABLED=0 go build -o rincewind .    # static, how it ships
 make                                     # lint (golangci-lint), test, build
 make release                             # the release matrix, locally (goreleaser)
@@ -196,14 +195,15 @@ make release                             # the release matrix, locally (goreleas
 - Config tests are table-driven over YAML literals
   and assert the error strings;
   those messages are a feature, keep them covered.
-- `hats/demo` is the config-level fixture: every view invents its own data,
+- `example` is the config-level fixture: every view invents its own data,
   so `internal/config/hat_demo_test.go` exercises sorts, formats, emphasis,
   parameters, cell errors, both action scopes and cross-file linking
   without a cluster.
   Add to that hat when adding a schema feature.
-- The `hats/albedaran` tests run the **shipped** views
-  against a fake `kubectl` on `PATH`,
-  which is what keeps their jq honest.
+- There is no test here that runs a real cluster's views against a fake
+  `kubectl` on `PATH` any more:
+  the albedaran hat moved to `vshn/rincewind-hats`, and that coverage —
+  which is what keeps a hat's jq honest — belongs there now.
 - TUI tests drive `model.Update` with synthetic key messages,
   inject `resultMsg` directly, bypassing `tea.Cmd`,
   and assert on `View().Content`.

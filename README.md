@@ -62,7 +62,7 @@ rincewind hats install vshn/rincewind-hats
 export RINCEWIND_HAT=~/.config/rincewind/vshn-rincewind-hats/albedaran
 
 rincewind                      # TUI, on the hat above
-rincewind --hat ./hats/demo    # try it without a cluster, no install needed
+rincewind --hat ./example      # try it without a cluster, no install needed
 rincewind check                # validate the hat without starting the TUI
 rincewind view nodes.status    # print one view and exit, no TUI
 ```
@@ -129,7 +129,7 @@ make release      # all four release binaries in dist/, without publishing
 
 - [docs/architecture.md](docs/architecture.md) — pipeline, stdout contract,
   config schema, error philosophy, decisions
-- [hats/demo/](hats/demo/) — a hat that invents its own data:
+- [example/](example/) — a hat that invents its own data:
   no cluster, no kubectl.
   Read it first when writing a hat of your own
 
