@@ -35,8 +35,9 @@ view, about the row under the cursor. `script:` does work — once per
 **selected** row, with values derived by jq reaching the script as
 environment variables, never templated into it.
 
-A working action opens its tab showing the exact invocations it is about to
-make, and asks underneath them:
+A working action opens its tab, collects any parameters it needs one field at
+a time, then shows the exact invocations it is about to make and asks
+underneath them:
 
 ```
 pause  infra
@@ -52,9 +53,9 @@ call that produced it, and `esc` takes you back to the list untouched.
 ## Use
 
 ```
-aldediggi                        # TUI; config from ~/.config/aldediggi/config.yaml
-aldediggi -c examples/config.yaml  # try it without a cluster (demo view included)
-aldediggi check                  # validate the config without starting the TUI
+aldediggi                  # TUI; config from ~/.config/aldediggi/
+aldediggi -c examples      # try it without a cluster (demo view included)
+aldediggi check            # validate the config without starting the TUI
 ```
 
 In the TUI: `⏎` runs the view under the cursor, `⇥` focuses the output,
@@ -81,4 +82,4 @@ make release      # static macOS and Linux binaries in dist/
 
 - [docs/architecture.md](docs/architecture.md) — pipeline, stdout contract,
   config schema, error philosophy, decisions
-- [examples/config.yaml](examples/config.yaml) — commented example views
+- [examples/](examples/) — the shipped views, one file per group

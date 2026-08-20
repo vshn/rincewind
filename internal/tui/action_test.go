@@ -77,9 +77,6 @@ func TestOnlyYConfirms(t *testing.T) {
 	if len(m.tabs) != 1 {
 		t.Errorf("%d tabs after cancelling, want the job tab closed", len(m.tabs))
 	}
-	if m.pending != nil {
-		t.Error("the question is still pending")
-	}
 
 	m.Update(key("p"))
 	press(t, m, "y")
@@ -118,7 +115,7 @@ func TestUnconfirmedActionRunsAtOnce(t *testing.T) {
 	if m.cur().job == nil || !m.cur().job.done {
 		t.Fatal("the action did not run")
 	}
-	if m.pending != nil {
+	if m.cur().job.confirming() {
 		t.Error("it asked despite having no confirmation")
 	}
 }
@@ -167,7 +164,7 @@ func TestActionKeysNeedTheOutputPane(t *testing.T) {
 
 	m.Update(key("p"))
 
-	if len(rec.planned) != 0 || m.pending != nil {
+	if len(rec.planned) != 0 || len(m.tabs) != 1 {
 		t.Error("an action fired from the menu")
 	}
 }
@@ -224,18 +221,27 @@ func TestNoActionBoxWithoutActions(t *testing.T) {
 	}
 }
 
-// The question takes the box over, so it sits where the answer is expected.
-func TestConfirmationTakesOverTheActionBox(t *testing.T) {
+// The question lives in the job tab, under the command it is about — not in
+// the action box, which belongs to the view and would separate the two.
+func TestConfirmationSitsUnderTheCommand(t *testing.T) {
 	m, _ := drilling(t)
 	m.Update(key("space"))
 	m.Update(key("p"))
 
-	line := actionBoxLine(m)
-	if !strings.Contains(line, "[y/N]") {
-		t.Errorf("action box %q is not the question", line)
+	content := visibleOnly(m.View().Content)
+	command := strings.Index(content, "echo")
+	question := strings.Index(content, "[y/N]")
+	switch {
+	case question < 0:
+		t.Fatal("the question is not on screen")
+	case command < 0:
+		t.Fatal("the command is not on screen")
+	case question < command:
+		t.Error("the question is asked above the command it is about")
 	}
-	if strings.Contains(line, "p pause") {
-		t.Error("the action legend is still there under the question")
+	// A job tab offers no actions, so it has no action box at all.
+	if m.actionBoxHeight() != 0 {
+		t.Error("the job tab reserved an action box for the question")
 	}
 }
 

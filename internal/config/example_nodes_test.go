@@ -81,7 +81,7 @@ esac
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	views, err := Load("../../examples/config.yaml")
+	views, err := Load("../../examples")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -104,6 +104,9 @@ type record struct {
 	// parent counts runs of the view the actions hang off, which is how a
 	// reload proves itself.
 	parent int
+	// planArgs is what a parameterised action was planned with, once its
+	// form was filled in.
+	planArgs []engine.Args
 }
 
 func drillViews(rec *record) []engine.View {
@@ -145,6 +148,27 @@ func drillViews(rec *record) []engine.View {
 				Key: "u", Name: "unpause", Short: "Resume, without asking",
 				Reload: true,
 				Plan:   planFor(rec, "resumed"),
+			},
+			// Acts on nothing and needs values first: the create case.
+			{
+				Key: "n", Name: "create", Short: "Create a pool",
+				Rowless: true,
+				Params: []engine.Param{
+					{Name: "name", Short: "pool name", Required: true},
+					{Name: "size", Short: "how many nodes", Default: "3"},
+				},
+				Confirm: func(_ []any, cur engine.Args) (string, error) {
+					return "Create pool " + cur["name"], nil
+				},
+				Plan: func(_ []any, cur engine.Args) ([]engine.Step, error) {
+					rec.planArgs = append(rec.planArgs, cur)
+					return []engine.Step{{
+						Env:    engine.Args{"name": cur["name"], "size": cur["size"]},
+						Shell:  []string{"sh", "-c"},
+						Script: `echo "created $name/$size"`,
+						Stdin:  []byte{},
+					}}, nil
+				},
 			},
 		},
 	}

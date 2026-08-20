@@ -171,10 +171,6 @@ func (m *model) tabAt(x, y int) int {
 // box over rather than appearing elsewhere, so it sits where the answer is
 // expected and cannot be missed.
 func (m *model) actionLine() string {
-	if m.pending != nil {
-		return promptStyle.Render(m.prompt + "  [y/N]")
-	}
-
 	// The descriptions go before any action does: knowing that `p` pauses
 	// beats knowing what pausing means, and a clipped line tells neither.
 	acts := m.viewActions()

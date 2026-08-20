@@ -153,6 +153,36 @@ func TestBrokenActionsFailWithContext(t *testing.T) {
 			want: []string{"demo.pools", "no name"},
 		},
 		{
+			name: "unknown scope",
+			yaml: strings.Replace(withActions, "      - key: p", "      - scope: sideways\n        key: p", 1),
+			want: []string{"demo.pools", "pause", "sideways", "not rows or none"},
+		},
+		{
+			name: "scope on a navigating action",
+			yaml: strings.Replace(withActions, "        open: demo.nodes", "        open: demo.nodes\n        scope: none", 1),
+			want: []string{"demo.pools", "nodes", "scope belongs to a script"},
+		},
+		{
+			name: "params on a navigating action",
+			yaml: strings.Replace(withActions, "        open: demo.nodes", "        open: demo.nodes\n        params: [{name: x}]", 1),
+			want: []string{"demo.pools", "nodes", "params belong to a script"},
+		},
+		{
+			name: "uppercase param name",
+			yaml: strings.Replace(withActions, "      - key: p", "      - params: [{name: PATH}]\n        key: p", 1),
+			want: []string{"demo.pools", "pause", "PATH", "lowercase"},
+		},
+		{
+			name: "param declared twice",
+			yaml: strings.Replace(withActions, "      - key: p", "      - params: [{name: why}, {name: why}]\n        key: p", 1),
+			want: []string{"demo.pools", "pause", "why", "twice"},
+		},
+		{
+			name: "param shadows an env name",
+			yaml: strings.Replace(withActions, "      - key: p", "      - params: [{name: name}]\n        key: p", 1),
+			want: []string{"demo.pools", "pause", "also an env name"},
+		},
+		{
 			name: "action without a key",
 			yaml: strings.Replace(withActions, "      - key: p", "      - short: nothing binds this", 1),
 			want: []string{"demo.pools", "pause", "no key"},

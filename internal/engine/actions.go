@@ -16,7 +16,7 @@ import (
 func compileActions(d Def) ([]Action, error) {
 	var out []Action
 	for _, a := range d.Actions {
-		act := Action{Key: a.Key, Name: a.Name, Short: a.Short, Reload: a.Reload}
+		act := Action{Key: a.Key, Name: a.Name, Short: a.Short, Reload: a.Reload, Params: a.Params}
 		where := "action " + a.Name
 
 		switch {
@@ -37,7 +37,8 @@ func compileActions(d Def) ([]Action, error) {
 			sort.Strings(act.argNames) // stable error messages
 
 		default:
-			plan, err := compilePlan(d, a, where)
+			act.Rowless = a.Scope == ScopeNone
+			plan, err := compilePlan(d, a, where, act.Rowless)
 			if err != nil {
 				return nil, err
 			}
@@ -92,7 +93,7 @@ func compileArgs(view, where string, exprs map[string]string) (func(any, Args) (
 // compilePlan builds the planner for a working action: one step per row, so
 // each invocation names exactly one object. Planning is separate from
 // running because the tool shows what it is about to do before it does it.
-func compilePlan(d Def, a ActionDef, where string) (func([]any, Args) ([]Step, error), error) {
+func compilePlan(d Def, a ActionDef, where string, rowless bool) (func([]any, Args) ([]Step, error), error) {
 	shell := a.Shell
 	if len(shell) == 0 {
 		shell = []string{"sh", "-c"}
@@ -105,6 +106,28 @@ func compilePlan(d Def, a ActionDef, where string) (func([]any, Args) ([]Step, e
 			return nil, err
 		}
 		codes[name] = code
+	}
+
+	if rowless {
+		return func(_ []any, cur Args) ([]Step, error) {
+			env := Args{}
+			for name, value := range cur {
+				env[name] = value
+			}
+			// No row to evaluate against, so the input is null and the
+			// expressions work from $args — which is where a rowless
+			// action's values come from anyway.
+			for name, code := range codes {
+				v, err := firstValue(context.Background(), code, nil, cur)
+				if err != nil {
+					return nil, fmt.Errorf("env %s: %v", name, err)
+				}
+				env[name] = valueText(v)
+			}
+			// Empty rather than nil: a nil stdin leaves the script attached
+			// to the terminal, where it would eat the user's keystrokes.
+			return []Step{{Env: env, Shell: shell, Script: a.Script, Stdin: []byte{}}}, nil
+		}, nil
 	}
 
 	return func(rows []any, cur Args) ([]Step, error) {

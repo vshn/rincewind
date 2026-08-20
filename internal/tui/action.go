@@ -35,29 +35,27 @@ func (m *model) fire(a *engine.Action) tea.Cmd {
 
 	// A mutation acts on what was deliberately marked, never on whatever
 	// happens to be filtered into view: a forgotten filter must not be able
-	// to turn one loose on everything on screen.
-	rows, keys := m.selectedRows()
-	if len(rows) == 0 {
-		m.notice = "select rows first (␣ or a)"
-		return nil
+	// to turn one loose on everything on screen. An action that acts on
+	// nothing is exempt — there are no rows for it to look at.
+	var rows []any
+	var keys []string
+	if a.NeedsRows() {
+		if rows, keys = m.selectedRows(); len(rows) == 0 {
+			m.notice = "select rows first (␣ or a)"
+			return nil
+		}
 	}
 
-	steps, err := a.Plan(rows, m.cur().args)
-	if err != nil {
-		m.notice = fmt.Sprintf("%s: %v", a.Name, err)
-		return nil
-	}
-	for i := range steps {
-		steps[i].Row = keys[i]
-	}
-
-	// The commands go on screen before anything runs, so the question below
-	// them is one that can actually be answered.
+	// The tab opens now and carries the whole interaction: the form first if
+	// the action needs values, then the commands, then the question.
 	from := m.cur()
 	m.park()
 	m.closeFrom(m.act + 1)
 
-	t := &tab{job: &job{name: a.Name, steps: steps}}
+	t := &tab{job: &job{
+		action: *a, rows: rows, keys: keys, args: from.args,
+		vals: map[string]string{},
+	}}
 	if a.Reload {
 		t.job.reload = from
 	}
@@ -66,20 +64,95 @@ func (m *model) fire(a *engine.Action) tea.Cmd {
 	m.filter.SetValue("")
 	m.vp.SetYOffset(0)
 	m.vp.SetXOffset(0)
-	m.showResult()
 
-	if a.Confirm == nil {
+	if t.job.asking() {
+		return m.field(t.job)
+	}
+	return m.plan(t)
+}
+
+// field arms the input for the parameter now being asked for. A default is
+// shown rather than applied invisibly, so plain enter takes it and the user
+// can see what they took.
+func (m *model) field(j *job) tea.Cmd {
+	p := j.field()
+	m.input.Reset()
+	m.input.Prompt = p.Name + ": "
+	m.input.SetValue(p.Default)
+	m.input.CursorEnd()
+	m.showResult()
+	return m.input.Focus()
+}
+
+// accept records the field on screen and moves on, planning once the last
+// one is in.
+func (m *model) accept(t *tab) tea.Cmd {
+	j := t.job
+	p, value := j.field(), m.input.Value()
+
+	if value == "" && p.Required {
+		m.notice = p.Name + " is required"
+		return nil
+	}
+	j.vals[p.Name] = value
+	j.idx++
+
+	if j.asking() {
+		return m.field(j)
+	}
+	m.input.Blur()
+	return m.plan(t)
+}
+
+// plan turns the job into the invocations it will make and asks about them.
+// It runs after collection because the values are what make the command
+// concrete — and a command one cannot see is not one to confirm.
+func (m *model) plan(t *tab) tea.Cmd {
+	j := t.job
+
+	args := engine.Args{}
+	for k, v := range j.args {
+		args[k] = v
+	}
+	bound, err := j.action.Bind(j.vals)
+	if err != nil {
+		m.notice = fmt.Sprintf("%s: %v", j.action.Name, err)
+		return m.closeTab()
+	}
+	for k, v := range bound {
+		args[k] = v
+	}
+	j.args = args
+
+	steps, err := j.action.Plan(j.rows, args)
+	if err != nil {
+		m.notice = fmt.Sprintf("%s: %v", j.action.Name, err)
+		return m.closeTab()
+	}
+	for i := range steps {
+		if i < len(j.keys) {
+			steps[i].Row = j.keys[i]
+		}
+	}
+	j.steps = steps
+
+	if j.action.Confirm == nil {
+		m.showResult()
 		return m.work(t)
 	}
-	prompt, err := a.Confirm(rows, from.args)
+	prompt, err := j.action.Confirm(j.rows, args)
 	if err != nil {
-		m.notice = fmt.Sprintf("%s: %v", a.Name, err)
-		return nil
+		m.notice = fmt.Sprintf("%s: %v", j.action.Name, err)
+		return m.closeTab()
 	}
 	// The count comes from here rather than from the config, so a
 	// confirmation cannot be written that fails to say how much it touches.
-	m.pending, m.pendingTab = a, t
-	m.prompt = fmt.Sprintf("%s (%s)", prompt, plural(len(rows), "row"))
+	// A rowless action is exactly one step, and that step is on screen.
+	j.prompt = prompt
+	if j.action.NeedsRows() {
+		j.prompt = fmt.Sprintf("%s (%s)", prompt, plural(len(j.rows), "row"))
+	}
+	m.showResult()
 	return nil
 }
 
@@ -169,12 +242,12 @@ func (m *model) selectedRows() (rows []any, keys []string) {
 	return rows, keys
 }
 
-// answer resolves a pending confirmation. Only y proceeds; every other key
+// answer resolves a job's confirmation. Only y proceeds; every other key
 // cancels, and cancelling closes the tab that was opened to show the
 // command — there is nothing left for it to report.
 func (m *model) answer(key string) tea.Cmd {
-	t := m.pendingTab
-	m.pending, m.pendingTab, m.prompt = nil, nil, ""
+	t := m.cur()
+	t.job.prompt = ""
 
 	if key == "y" || key == "Y" {
 		return m.work(t)
@@ -182,17 +255,22 @@ func (m *model) answer(key string) tea.Cmd {
 	return m.closeTab()
 }
 
-// lines is what the job tab shows: for every row, the invocation and then
-// what it said. The command is there from the moment the tab opens, before
-// anything has run — seeing it is the reason the tab exists.
-func (j *job) lines() []string {
+// lines is what the job tab shows, which is the whole interaction: the form
+// while it is being filled in, then for every row the invocation and what it
+// said. The command is there from the moment the values are in, before
+// anything runs — seeing it is the reason the tab exists.
+func (j *job) lines(input string) []string {
+	if j.asking() {
+		return j.form(input)
+	}
+
 	var out []string
 	for i, s := range j.steps {
 		if i > 0 {
 			out = append(out, "")
 		}
 
-		head := j.name
+		head := j.action.Name
 		if s.Row != "" {
 			head += "  " + s.Row
 		}
@@ -218,11 +296,36 @@ func (j *job) lines() []string {
 		}
 	}
 
-	// The last word: how it went, in one line, for a run too long to read.
-	if j.done {
+	switch {
+	case j.confirming():
+		// The question sits under the command it is about, so both are read
+		// in one glance.
+		out = append(out, "")
+		for _, line := range strings.Split(j.prompt, "\n") {
+			out = append(out, promptStyle.Render(line))
+		}
+		out = append(out, promptStyle.Render("[y/N]"))
+	case j.done:
+		// The last word: how it went, in one line, for a run too long to read.
 		out = append(out, "", j.summary())
 	}
 	return out
+}
+
+// form is the tab while the action's parameters are being collected.
+// Answered fields stay on screen: by the fourth one you have forgotten the
+// first, and this is the last chance to catch a typo before confirming.
+func (j *job) form(input string) []string {
+	p := j.field()
+
+	head := headerStyle.Render(j.action.Name)
+	head += dividerStyle.Render(fmt.Sprintf("  (%d of %d)  %s", j.idx+1, len(j.action.Params), p.Short))
+
+	out := []string{head, ""}
+	for _, done := range j.action.Params[:j.idx] {
+		out = append(out, dividerStyle.Render("  "+done.Name+": ")+j.vals[done.Name])
+	}
+	return append(out, "  "+input)
 }
 
 // summary counts the steps that failed, because after acting on nine rows
@@ -241,7 +344,7 @@ func (j *job) summary() string {
 }
 
 // label names the job tab.
-func (j *job) label() string { return j.name }
+func (j *job) label() string { return j.action.Name }
 
 func plural(n int, what string) string {
 	if n == 1 {

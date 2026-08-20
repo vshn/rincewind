@@ -7,7 +7,7 @@ import (
 // The shipped example config must stay loadable, and its cluster-free demo
 // view must actually run — it is the first thing anyone tries.
 func TestExampleConfigWorks(t *testing.T) {
-	views, err := Load("../../examples/config.yaml")
+	views, err := Load("../../examples")
 	if err != nil {
 		t.Fatal(err)
 	}

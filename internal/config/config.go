@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -63,6 +65,8 @@ type action struct {
 	Env     map[string]string `yaml:"env"`
 	Confirm string            `yaml:"confirm"`
 	Reload  bool              `yaml:"reload"`
+	Scope   string            `yaml:"scope"`
+	Params  []param           `yaml:"params"`
 }
 
 type column struct {
@@ -78,24 +82,73 @@ type sortBy struct {
 	Rank  []string `yaml:"rank"`
 }
 
-// Load reads and compiles a config file.
+// Load reads and compiles a config file, or every *.yaml in a directory.
+// A directory keeps one file per group, which is how the views were arranged
+// when they were Go source and is still how one thinks about them.
 func Load(path string) ([]engine.View, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+
+	files := []string{path}
+	if info.IsDir() {
+		if files, err = filepath.Glob(filepath.Join(path, "*.yaml")); err != nil {
+			return nil, err
+		}
+		sort.Strings(files) // menu order must not depend on the filesystem
+		if len(files) == 0 {
+			return nil, fmt.Errorf("%s: holds no .yaml files", path)
+		}
+	}
+
+	var views []engine.View
+	for _, name := range files {
+		read, err := loadFile(name)
+		if err != nil {
+			return nil, err
+		}
+		views = append(views, read...)
+	}
+
+	// One view may open another declared in a different file, so linking
+	// waits until every file has been read.
+	if err := link(views); err != nil {
+		return nil, err
+	}
+	return views, nil
+}
+
+func loadFile(path string) ([]engine.View, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close() //nolint:errcheck // read-only
 
-	views, err := Parse(f)
+	views, err := compile(f)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return views, nil
 }
 
-// Parse reads a config document. Split from Load so tests and callers with
-// embedded config need no file.
+// Parse reads one config document and links it. Split from Load so tests and
+// callers with embedded config need no file.
 func Parse(r io.Reader) ([]engine.View, error) {
+	views, err := compile(r)
+	if err != nil {
+		return nil, err
+	}
+	if err := link(views); err != nil {
+		return nil, err
+	}
+	return views, nil
+}
+
+// compile turns one document into views, without resolving what its actions
+// open — that needs every other file to have been read first.
+func compile(r io.Reader) ([]engine.View, error) {
 	dec := yaml.NewDecoder(r)
 	dec.KnownFields(true)
 
@@ -107,32 +160,32 @@ func Parse(r io.Reader) ([]engine.View, error) {
 		return nil, fmt.Errorf("no views defined")
 	}
 
-	seen := map[string]bool{}
 	views := make([]engine.View, 0, len(doc.Views))
 	for _, v := range doc.Views {
 		def, err := toDef(v)
 		if err != nil {
 			return nil, err
 		}
-		if seen[v.ID] {
-			return nil, fmt.Errorf("view %q: defined twice", v.ID)
-		}
-		seen[v.ID] = true
-
 		compiled, err := engine.Compile(def)
 		if err != nil {
 			return nil, err
 		}
 		views = append(views, compiled)
 	}
-
-	// Navigating actions are resolved once every view exists, so an action
-	// may open one declared further down the file — and an unknown target
-	// dies here rather than as a surprise at run time.
-	if err := engine.Link(views); err != nil {
-		return nil, err
-	}
 	return views, nil
+}
+
+// link resolves navigating actions and catches an id used twice — which,
+// with several files, is a mistake made across them as easily as within one.
+func link(views []engine.View) error {
+	seen := map[string]bool{}
+	for _, v := range views {
+		if seen[v.ID] {
+			return fmt.Errorf("view %q: defined twice", v.ID)
+		}
+		seen[v.ID] = true
+	}
+	return engine.Link(views)
 }
 
 // envName is what a parameter may be called. Lowercase only, which keeps
@@ -147,7 +200,7 @@ var reserved = map[string]bool{
 	"esc": true, "up": true, "down": true, "k": true, "j": true,
 	"pgup": true, "pgdown": true, "ctrl+f": true, "ctrl+b": true,
 	"home": true, "end": true, "g": true, "G": true,
-	"r": true, "space": true, " ": true, "a": true, "m": true,
+	"r": true, "space": true, " ": true, "a": true, "M": true,
 	"[": true, "]": true, "x": true, "<": true, ">": true,
 }
 
@@ -277,10 +330,48 @@ func toDef(v view) (engine.Def, error) {
 				return fail("action %s: confirm belongs to a script, not to open", a.Name)
 			case a.Reload:
 				return fail("action %s: reload belongs to a script, not to open", a.Name)
+			case a.Scope != "":
+				return fail("action %s: scope belongs to a script; a navigation always follows the cursor", a.Name)
+			case len(a.Params) > 0:
+				return fail("action %s: params belong to a script; a navigation takes its arguments from the row", a.Name)
 			}
 		} else if len(a.Args) > 0 {
 			return fail("action %s: args belong to open, not to a script", a.Name)
 		}
+
+		var params []engine.Param
+		asked := map[string]bool{}
+		for _, p := range a.Params {
+			switch {
+			case !envName.MatchString(p.Name):
+				return fail("action %s: param %q: a name must be lowercase letters, digits and underscores, so it cannot shadow PATH or HOME", a.Name, p.Name)
+			case asked[p.Name]:
+				return fail("action %s: param %s: declared twice", a.Name, p.Name)
+			// Both would set the same variable. Rather than declare which
+			// wins, forbid it: then the precedence is unobservable and there
+			// is one fewer rule to remember.
+			case seen[p.Name]:
+				return fail("action %s: param %q is also a parameter of this view", a.Name, p.Name)
+			case a.Env[p.Name] != "":
+				return fail("action %s: param %q is also an env name; both would set the same variable", a.Name, p.Name)
+			}
+			asked[p.Name] = true
+			params = append(params, engine.Param{
+				Name: p.Name, Short: p.Short, Default: p.Default, Required: p.Required,
+			})
+		}
+
+		// A rowless action may still derive values — from its own parameters
+		// rather than from a row, which is how a create turns wall clock
+		// into RFC 3339. Its env expressions run against a null input, so
+		// one that reaches for the row yields empty; that is not silent,
+		// because every value is printed in the job tab before anything runs.
+		switch a.Scope {
+		case "", engine.ScopeRows, engine.ScopeNone:
+		default:
+			return fail("action %s: scope %q is not rows or none", a.Name, a.Scope)
+		}
+
 		for name := range a.Env {
 			if !envName.MatchString(name) {
 				return fail("action %s: env %q: a name must be lowercase letters, digits and underscores", a.Name, name)
@@ -291,7 +382,7 @@ func toDef(v view) (engine.Def, error) {
 			Key: a.Key, Name: a.Name, Short: a.Short,
 			Open: a.Open, Args: a.Args,
 			Shell: a.Shell, Script: a.Script, Env: a.Env,
-			Confirm: a.Confirm, Reload: a.Reload,
+			Confirm: a.Confirm, Reload: a.Reload, Scope: a.Scope, Params: params,
 		})
 	}
 

@@ -7,11 +7,16 @@ with jq expressions (gojq).
 This replaces the earlier builtin-views design; the reasoning for the
 reversal is recorded in docs/architecture.md.
 
-**Status:** config loader, engine pipeline, the table view with row
-selection, view parameters and actions — both kinds — are built. Drill-down
-is an action that navigates; targets open as tabs. TUI only.
-Not built yet: action parameters (prompting for a value), batched actions,
-CLI output mode, stream views (follow logs), other view classes.
+**Status:** config loader (file or directory), engine pipeline, the table
+view with row selection, view and action parameters, and actions — both
+kinds — are built. Drill-down is an action that navigates; a working action
+gets a tab that collects its parameters, shows the commands, asks, and holds
+the output. The previous generation's 16 views are ported except the two log
+views. TUI only.
+
+Not built yet: the two log views and the cluster-name probe (both deliberately
+deferred); batched (`once:`) actions; CLI output mode; stream views (following
+logs); `loki` and `pods`; a managed port-forward for `argo ui`.
 
 ## Docs
 
@@ -29,9 +34,14 @@ the **cursor row**; `script:` works, once per row, and acts on the
 **selection**, refusing when there is none. Drill-down is not a separate
 feature — do not add one.
 
+An action may have `params:` of its own, and `scope: none` if it acts on
+nothing (a create). Parameters are collected **in the job tab**, before
+planning, because the values are what make the command concrete.
+
 A **tab** holds either a view — with its own result, filter, selection,
-cursor and scroll position — or a **job**: a working action's commands and
-their output. Both kinds of action open a tab; `esc` closes it.
+cursor and scroll position — or a **job**: an action's form, its commands,
+its question and its output, in that order. Both kinds of action open a tab;
+`esc` closes it.
 
 ## Invariants
 
@@ -54,6 +64,10 @@ their output. Both kinds of action open a tab; `esc` closes it.
   executing anything; only `Step.Run` executes. Never collapse the two, and
   never render a step as one shell-quoted line — the values travel beside
   the script, not inside it.
+- **Collect, then plan, then ask, then run** — in that order, all in the one
+  job tab. Do not move the form or the question into the chrome.
+- **Lower-case keys belong to the views.** The reserved set in
+  `internal/config` is the contract; grow it only under protest.
 - **Everything a config can get wrong dies in `internal/config` at load
   time**, naming view and action — including an `open` target that does not
   exist and an argument the target does not declare.

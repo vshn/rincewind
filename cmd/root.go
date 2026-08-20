@@ -71,7 +71,10 @@ func configPath() string {
 	if err != nil {
 		return "config.yaml"
 	}
-	return filepath.Join(home, ".config", "aldediggi", "config.yaml")
+	// The directory, not a file in it: loading a directory reads every
+	// *.yaml in it, so both a single config.yaml and one file per group work
+	// without the user having to say which they chose.
+	return filepath.Join(home, ".config", "aldediggi")
 }
 
 func init() {

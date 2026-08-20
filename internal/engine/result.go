@@ -101,6 +101,14 @@ type Action struct {
 	Plan    func(rows []any, cur Args) ([]Step, error)
 	Confirm func(rows []any, cur Args) (string, error)
 	Reload  bool
+	// Rowless marks an action that acts on nothing — a create, or one that
+	// works from the view's own parameters. It plans exactly one step.
+	Rowless bool
+
+	// Params are values the action needs that the view cannot supply, such
+	// as the name and dates of something being created. They are asked for
+	// before anything is planned.
+	Params []Param
 
 	// openID and argNames survive compilation so Link can resolve the target
 	// and check the arguments against the parameters it declares.
@@ -110,6 +118,11 @@ type Action struct {
 
 // Navigates reports which kind of action this is.
 func (a Action) Navigates() bool { return a.Open != nil }
+
+// NeedsRows reports whether the action works on the selected rows. One that
+// creates something acts on nothing, so demanding a selection from it would
+// be asking for rows it will never look at.
+func (a Action) NeedsRows() bool { return !a.Navigates() && !a.Rowless }
 
 // Step is one invocation an action will make: one row, the environment it
 // gets and the script handed to the shell. Nothing here is interpolated —
@@ -174,6 +187,26 @@ type View struct {
 	Params  []Param
 	Actions []Action
 	Run     func(ctx context.Context, args Args) (Table, error)
+}
+
+// Bind resolves collected values against the declared parameters: the value
+// if given, else the default, else an error when the parameter is required.
+// One place decides "required and missing".
+func (a Action) Bind(values map[string]string) (Args, error) {
+	out := Args{}
+	for _, p := range a.Params {
+		switch v := values[p.Name]; {
+		case v != "":
+			out[p.Name] = v
+		case p.Default != "":
+			out[p.Name] = p.Default
+		case p.Required:
+			return nil, fmt.Errorf("%s needs %s", a.Name, p.Name)
+		default:
+			out[p.Name] = ""
+		}
+	}
+	return out, nil
 }
 
 // Listed reports whether the view can be started from the menu. One that

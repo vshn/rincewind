@@ -167,7 +167,7 @@ func TestMouseCanBeReleasedAndGrabbedAgain(t *testing.T) {
 		t.Fatal("the mouse is not captured by default")
 	}
 
-	m.Update(key("m"))
+	m.Update(key("M"))
 	if m.View().MouseMode != tea.MouseModeNone {
 		t.Error("m did not release the mouse")
 	}
@@ -175,7 +175,7 @@ func TestMouseCanBeReleasedAndGrabbedAgain(t *testing.T) {
 		t.Error("the help does not say how to get the mouse back")
 	}
 
-	m.Update(key("m"))
+	m.Update(key("M"))
 	if m.View().MouseMode != tea.MouseModeCellMotion {
 		t.Error("m did not grab the mouse again")
 	}

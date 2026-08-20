@@ -1,70 +1,7 @@
-# Example view config. Try it without a cluster:
-#
-#   aldediggi -c examples/config.yaml
-#
-# The demo view synthesizes its rows; the others are real-world references
-# that need kubectl and a cluster.
+# All things node related: the kubelet, scheduling, and the machine-config
+# rollout — plus the pools that drive it.
 
 views:
-  # Cluster-free smoke test. Two echo calls emit two JSON documents — the
-  # stdout contract is a *stream* of JSON values, and `rows` runs over each,
-  # so a script can pull from several sources without merging them itself.
-  - id: demo.services
-    title: Demo services
-    source:
-      script: |
-        echo '{"items":[{"name":"api","state":"Healthy","since":"2026-08-18T09:00:00Z","restarts":2}]}'
-        echo '{"items":[{"name":"worker","state":"Degraded","since":"2026-08-20T07:30:00Z","restarts":17},
-                        {"name":"cache","state":"Healthy","since":"2026-05-02T11:00:00Z","restarts":0}]}'
-    rows: .items[]
-    key: .name
-    columns:
-      - name: NAME
-        expr: .name
-      - name: STATE
-        expr: .state
-        emphasis: { Healthy: good, Degraded: bad }
-      - name: RESTARTS
-        expr: .restarts
-      - name: SINCE
-        expr: .since
-        format: timestamp
-      - name: AGE
-        expr: .since
-        format: age
-    sort:
-      - by: STATE
-        rank: [Degraded, Healthy]
-      - by: NAME
-
-  - id: argo.apps
-    title: Argo applications
-    refresh: 30s
-    source:
-      script: |
-        kubectl get applications -A -o json
-    rows: .items[]
-    key: .metadata.name
-    columns:
-      - name: NAME
-        expr: .metadata.name
-      - name: SYNC
-        expr: .status.sync.status
-        emphasis: { Synced: good, OutOfSync: bad, Unknown: warn }
-      - name: HEALTH
-        expr: .status.health.status
-        emphasis: { Healthy: good, Degraded: bad, Progressing: warn, Missing: warn }
-      - name: AUTO
-        expr: 'if .spec.syncPolicy.automated then "auto" else "manual" end'
-      - name: REVISION
-        expr: .status.sync.revision[0:8]
-      - name: MESSAGE
-        expr: .status.conditions[0].message // ""
-    sort:
-      - by: SYNC
-        rank: [OutOfSync, Unknown, Synced]
-      - by: NAME
-
   # Port of the old builtin `nodes status`: kubelet, scheduling and
   # machine-config rollout. The CONFIG column judges a node against its
   # pool's rendered target — the state annotation alone reads "Done" on a
@@ -172,6 +109,46 @@ views:
       - by: SINCE
         order: desc
       - by: NAME
+    actions:
+      - key: enter
+        name: conditions
+        short: Show this node's conditions
+        open: nodes.conditions
+        args:
+          node: .metadata.name
+      - key: m
+        name: config
+        short: Show this node's machine-config rollout
+        open: nodes.config
+        args:
+          node: .metadata.name
+
+      # Cordon only stops new pods landing; it does not move the ones already
+      # there. Saying so is the difference between this and a drain, which
+      # this tool deliberately does not offer.
+      - key: c
+        name: cordon
+        short: Stop scheduling
+        confirm: >-
+          "Stop scheduling on \(map(.metadata.name) | join(", "))" +
+          "\n\nRunning pods stay where they are; this only stops new ones landing."
+        env:
+          node: .metadata.name
+        script: |
+          kubectl --as system:admin patch node "$node" \
+            --type merge -p '{"spec":{"unschedulable":true}}'
+        reload: true
+
+      - key: C
+        name: uncordon
+        short: Allow scheduling
+        confirm: '"Allow scheduling on \(map(.metadata.name) | join(", "))"'
+        env:
+          node: .metadata.name
+        script: |
+          kubectl --as system:admin patch node "$node" \
+            --type merge -p '{"spec":{"unschedulable":null}}'
+        reload: true
 
   # MachineConfigPools, and the drill-down into the nodes one covers. This is
   # what actions are for: `open` navigates, `script` works, and both derive
@@ -250,3 +227,102 @@ views:
           kubectl patch machineconfigpool "$name" --type merge \
             -p '{"spec":{"paused":false}}'
         reload: true
+
+  # Where the READY column above folds the kubelet's verdict into one word,
+  # this shows every condition — DiskPressure and MemoryPressure live here,
+  # and they are what one word cannot say.
+  - id: nodes.conditions
+    title: One node's conditions, as the kubelet wrote them
+    params:
+      - name: node
+        short: node name
+        required: true
+    source:
+      script: kubectl get nodes "$node" -o json
+    rows: .status.conditions[]?
+    key: .type
+    columns:
+      - name: WHEN
+        expr: .lastTransitionTime // ""
+        format: timestamp
+      - name: TYPE
+        expr: .type
+      # No emphasis: True is good on Ready and bad on DiskPressure.
+      - name: STATUS
+        expr: .status
+      - name: REASON
+        expr: .reason // ""
+      - name: MESSAGE
+        expr: .message // ""
+    sort:
+      - by: WHEN
+    actions:
+      - key: m
+        name: config
+        short: Show this node's machine-config rollout
+        open: nodes.config
+        args:
+          node: $args.node
+
+  # The rendered config names are far too long for a list, and are exactly
+  # what one compares against the pool when a rollout is stuck.
+  - id: nodes.config
+    title: One node's machine-config rollout in full
+    params:
+      - name: node
+        short: node name
+        required: true
+    source:
+      script: |
+        d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+        kubectl get nodes "$node" -o json > "$d/node.json"
+        kubectl get machineconfigpools -o json > "$d/pools.json" 2>/dev/null \
+          || echo '{"items":[]}' > "$d/pools.json"
+        jq -s '
+          .[1].items as $pools
+          | .[0] as $n
+          | ($n.metadata.labels // {}) as $lbl
+          | [ $pools[]
+              | (.spec.nodeSelector.matchLabels // {}) as $sel
+              | select(($sel | length) > 0
+                  and ([$sel | to_entries[] | $lbl[.key] == .value] | all)) ] as $matching
+          | ( [ $matching[] | select(.metadata.name == "master") ][0]
+              // ( [ $matching[] | select(.metadata.name != "master" and .metadata.name != "worker") ]
+                   | sort_by([-(.spec.nodeSelector.matchLabels | length), .metadata.name]) | .[0] )
+              // [ $matching[] | select(.metadata.name == "worker") ][0]
+            ) as $pool
+          | ($n.metadata.annotations // {}) as $a
+          | ($a["machineconfiguration.openshift.io/state"] // "") as $state
+          | ($a["machineconfiguration.openshift.io/currentConfig"] // "") as $cur
+          | ($a["machineconfiguration.openshift.io/desiredConfig"] // "") as $desired
+          | ($pool.status.configuration.name // "") as $target
+          | [ {what: "state",
+               value: (if $state == "Degraded" or $state == "Working" then $state
+                       elif $cur == "" then $state
+                       elif $desired != "" and $cur != $desired then "pending"
+                       elif $target != "" and $cur != $target then "behind"
+                       else $state end)},
+              {what: "pool",         value: ($pool.metadata.name // "")},
+              {what: "pool target",  value: $target},
+              {what: "node desired", value: $desired},
+              {what: "node current", value: $cur},
+              {what: "annotation",   value: $state},
+              {what: "reason",       value: ($a["machineconfiguration.openshift.io/reason"] // "")},
+              {what: "schedulable",  value: (if $n.spec.unschedulable then "no" else "yes" end)} ]
+          | .[]
+        ' "$d/node.json" "$d/pools.json"
+    rows: .
+    key: .what
+    columns:
+      - name: WHAT
+        expr: .what
+      - name: VALUE
+        expr: .value
+        emphasis: { Degraded: bad, Working: warn, pending: warn, behind: warn, Done: good, "no": warn }
+    actions:
+      - key: enter
+        name: conditions
+        short: Show this node's conditions
+        open: nodes.conditions
+        args:
+          node: $args.node

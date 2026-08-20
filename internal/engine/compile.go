@@ -45,7 +45,18 @@ type ActionDef struct {
 	Env     map[string]string
 	Confirm string
 	Reload  bool
+	// Scope says what the action works on: ScopeRows, the default, or
+	// ScopeNone for one that acts on nothing.
+	Scope string
+	// Params are asked for before the action is planned.
+	Params []Param
 }
+
+// What an action's scope may be.
+const (
+	ScopeRows = "rows"
+	ScopeNone = "none"
+)
 
 // ColumnDef projects one field of a row object into a cell.
 type ColumnDef struct {

@@ -140,18 +140,47 @@ type tab struct {
 	job *job
 }
 
-// job is a working action given a tab of its own: what it is about to run,
-// spelled out, and what that had to say. Showing the command before it runs
-// is the point — a confirmation with the invocation in plain sight above it
-// asks a question one can actually answer.
+// job is a working action given a tab of its own, and the whole of the
+// interaction with it: the parameters it still needs, then what it is about
+// to run spelled out, then the question, then what it had to say. Showing
+// the command before it runs is the point — a confirmation with the
+// invocation in plain sight above it asks a question one can answer.
 type job struct {
-	name   string
+	action engine.Action
+	rows   []any
+	keys   []string
+	args   engine.Args // the view's parameters, to merge the collected ones into
+
+	// vals and idx are the form: values collected so far, and the field
+	// being asked for.
+	vals map[string]string
+	idx  int
+
 	steps  []engine.Step
+	prompt string     // set once planned and a confirmation is wanted
 	out    [][]string // what each step printed, filled in as they finish
 	errs   []error    // and how it went wrong, per step
 	done   bool
 	reload *tab // the view to run again afterwards, if the action asked
 }
+
+// The phases a job walks through, in order.
+func (j *job) asking() bool     { return j.idx < len(j.action.Params) }
+func (j *job) confirming() bool { return !j.asking() && j.prompt != "" }
+
+// Whether the tab on screen is in one of those phases, for the help line.
+func (m *model) jobAsking() bool {
+	j := m.cur().job
+	return j != nil && j.asking()
+}
+
+func (m *model) jobConfirming() bool {
+	j := m.cur().job
+	return j != nil && j.confirming()
+}
+
+// field is the parameter being asked for.
+func (j *job) field() engine.Param { return j.action.Params[j.idx] }
 
 func newTab(v *engine.View, args engine.Args) *tab {
 	return &tab{view: v, args: args, selection: map[string]bool{}}
@@ -227,13 +256,10 @@ type model struct {
 	filter    textinput.Model
 	filtering bool
 
-	// pending holds an action waiting to be confirmed, together with the tab
-	// showing what it will run: the question was asked about those exact
-	// commands, so it is answered about them and not about whatever the
-	// selection has become by the time the key arrives.
-	pending    *engine.Action
-	pendingTab *tab
-	prompt     string
+	// input collects an action's parameters, one field at a time. A second
+	// widget rather than the filter's: that one's value belongs to a tab and
+	// is parked when another takes over.
+	input textinput.Model
 
 	// notice is what an action had to say before running — most often that
 	// nothing is selected. Cleared on the next keystroke, which is exactly
@@ -265,6 +291,7 @@ func newModel(views []engine.View) *model {
 	}
 	m.filter = textinput.New()
 	m.filter.Prompt = "/"
+	m.input = textinput.New()
 
 	// Long lines are not wrapped, so they can be scrolled instead. Wrapping a
 	// table row would make the columns meaningless.
@@ -483,10 +510,28 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// A notice was written for the keystroke before this one.
 	m.notice = ""
 
-	// A pending confirmation swallows every key, so that a stray j or p
-	// cannot answer a question about changing things.
-	if m.pending != nil {
-		return m, m.answer(key)
+	// A job in the middle of its form or its question owns the keyboard.
+	// Everything typed is part of the answer — including keys that are
+	// otherwise bindings, so a stray j cannot agree to change things.
+	if j := m.cur().job; j != nil {
+		switch {
+		case j.asking():
+			switch key {
+			case "enter":
+				return m, m.accept(m.cur())
+			case "esc":
+				// Nothing has been planned and nothing has run.
+				m.input.Blur()
+				return m, m.closeTab()
+			}
+			var cmd tea.Cmd
+			m.input, cmd = m.input.Update(msg)
+			m.showResult()
+			return m, cmd
+
+		case j.confirming():
+			return m, m.answer(key)
+		}
 	}
 
 	// While typing a filter the input owns the keyboard, or "q" would quit
@@ -604,9 +649,11 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.toggleAll()
 		return m, nil
 
-	case "m":
+	case "M":
 		// Releasing the mouse hands text selection back to the terminal,
-		// which is how one copies a node name out of a row.
+		// which is how one copies a node name out of a row. Upper case: the
+		// lower-case letters belong to the views, which have far more use
+		// for them than one global toggle does.
 		m.mouse = !m.mouse
 		return m, nil
 
@@ -1065,7 +1112,7 @@ func (m *model) sidebarBoxHeight() int {
 // actionBoxHeight is the room the action box takes, or none when the view
 // has nothing to offer — an empty frame would cost three lines to say so.
 func (m *model) actionBoxHeight() int {
-	if m.pending == nil && len(m.viewActions()) == 0 {
+	if len(m.viewActions()) == 0 {
 		return 0
 	}
 	return titleHeight
@@ -1140,7 +1187,7 @@ func (m *model) showResult() {
 
 	// A job tab shows commands and their output, not rows.
 	if t := m.cur(); t.job != nil {
-		lines := t.job.lines()
+		lines := t.job.lines(m.input.View())
 		m.head = ""
 		m.vp.SetContentLines(lines)
 		m.lines = len(lines)
@@ -1232,13 +1279,8 @@ func (m *model) View() tea.View {
 		top: tabs, topRight: m.scrollLabel()}.render(m.contentLines())
 
 	if h := m.actionBoxHeight(); h > 0 {
-		// A pending question owns the box and takes the eye with it.
-		border := borderStyle
-		if m.pending != nil {
-			border = promptStyle
-		}
 		right = lipgloss.JoinVertical(lipgloss.Left, right,
-			box{w: m.width - sidebarWidth, h: h, border: border}.render([]string{m.actionLine()}))
+			box{w: m.width - sidebarWidth, h: h, border: borderStyle}.render([]string{m.actionLine()}))
 	}
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top,
@@ -1267,7 +1309,11 @@ func (m *model) titleLine() string {
 
 	name := titleStyle.Render("aldediggi")
 	if j := m.cur().job; j != nil {
-		return name + sep + titleStyle.Render(j.name) + sep +
+		if j.asking() {
+			return name + sep + titleStyle.Render(j.action.Name) + sep +
+				descStyle.Render(j.action.Short)
+		}
+		return name + sep + titleStyle.Render(j.action.Name) + sep +
 			descStyle.Render(plural(len(j.steps), "step"))
 	}
 	cur := m.cur().view
@@ -1490,7 +1536,9 @@ type helpKey struct {
 func (m *model) help() string {
 	var keys []helpKey
 	switch {
-	case m.pending != nil:
+	case m.jobAsking():
+		keys = []helpKey{{"⏎ next field", 4}, {"esc cancel", 3}}
+	case m.jobConfirming():
 		keys = []helpKey{{"y confirm", 4}, {"any other key cancels", 1}}
 	case m.filtering:
 		keys = []helpKey{{"⏎ keep filter", 1}, {"esc clear", 2}}
@@ -1521,9 +1569,9 @@ func (m *model) help() string {
 		// Released is the surprising state, and the one you need the way
 		// back from, so it holds on to its place in a narrow legend.
 		if m.mouse {
-			keys = append(keys, helpKey{"m release mouse", 0})
+			keys = append(keys, helpKey{"M release mouse", 0})
 		} else {
-			keys = append(keys, helpKey{"m grab mouse", 3})
+			keys = append(keys, helpKey{"M grab mouse", 3})
 		}
 	}
 	return helpStyle.Render(fitKeys(keys, m.contentWidth()))

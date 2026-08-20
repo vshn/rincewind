@@ -68,8 +68,40 @@ showing. There is one mechanism, with two kinds:
 |---|---|---|---|
 | navigate | `open:` | the **cursor row**, always | opens the target view in a new tab |
 | run | `script:` | the **selection** — refuses when there is none | opens a tab showing the commands, then their output |
+| run, `scope: none` | `script:` | **nothing** — a create, or one working from the view's parameters | the same tab, with one step |
 
 Both kinds open a tab. `esc` closes it either way.
+
+An action may declare `params:` of its own — values the view cannot supply,
+such as the name and dates of something being created. They are **collected
+in the tab**, one field at a time, before anything is planned: the values are
+what make the command concrete, and a command that does not exist yet cannot
+be shown. So one tab carries the whole interaction, in order:
+
+```
+  ask        name: july-maintenance          answered fields stay on screen
+             reason: ▌                       (2 of 4)  why upgrades are suspended
+
+  confirm    name=july-maintenance           the planned step, verbatim
+             sh -c
+               kubectl create -f - <<EOF …
+             Create upgrade suspension july-maintenance   [y/N]
+
+  done       upgradesuspensionwindow/… created
+             1 step ok
+```
+
+The form and the question are tab content, which scrolls, so neither can push
+the footer off a short window — and a multi-line confirmation, the kind that
+carries the warning that is the point of asking, has room. A default is
+prefilled rather than applied invisibly; a required field refuses to be empty
+in place; `esc` abandons the whole thing and closes the tab.
+
+A `scope: none` action may still declare `env:`, evaluated against a null
+input so its expressions work from `$args` — which is how a create turns wall
+clock into RFC 3339 without `date`, whose flags differ between GNU and BSD.
+An expression that reaches for the row yields empty there, and that is not
+silent: every value is printed in the tab before anything runs.
 
 Drill-down is therefore not a feature of its own: it is an action that
 navigates. A dedicated `drilldown:` schema would have to be un-built the
@@ -184,8 +216,12 @@ Semantics that are easy to get wrong:
   display can lose the selection.
 - **Formats pass unparseable values through** instead of hiding them.
 
-The config lives at `~/.config/aldediggi/config.yaml`, overridable with
-`--config`/`-c` or `$ALDEDIGGI_CONFIG`.
+The config lives at `~/.config/aldediggi/`, overridable with `--config`/`-c`
+or `$ALDEDIGGI_CONFIG`. A **directory** is read as every `*.yaml` in it, in
+name order, which keeps one file per group — `argo.yaml`, `upgrade.yaml`,
+`nodes.yaml`, `alerts.yaml`. A single file works just as well; pointing at
+the directory covers both. Actions are linked once every file has been read,
+so a view may open one declared in another.
 
 ## Errors: the price of a config engine, paid deliberately
 
@@ -320,6 +356,12 @@ examples/          shipped example config, kept green by a test
 | Navigation follows the cursor row | Removes the old "select one pool first" refusal entirely |
 | An action runs once per row | Each call names one object: partial failure is reportable, and no selector can match something else |
 | A working action gets a tab, and shows its commands before running | Confirming blind is no confirmation; and the output has room to be read and scrolled instead of clipped |
+| The parameter form lives in that same tab | The values must be collected before the command exists; putting the form in the chrome would need variable-height layout and could not hold a multi-line question |
+| An action parameter may not shadow the view's or an `env:` name | Then the precedence is unobservable, and there is one fewer rule to remember |
+| Per-row invocations replace the old `kubectl -f -` List document | Each call names one object, so a partial failure is attributable |
+| The argo "root rider" is an instruction, not a hidden mutation | The old pause silently patched `root` too; a mutation nobody selected is what the selection rule exists to prevent |
+| A config directory, one file per group | Sixteen views in one file is unreadable; it is also how they were arranged as Go source |
+| The mouse toggle is `M`, not `m` | Lower-case letters belong to the views, which have far more use for them than one global toggle |
 | Planning is separate from running in the engine | The command can only be shown up front if producing it executes nothing |
 | A step is shown as env + shell + script, not one quoted line | The values never enter the script text; a quoted one-liner would misrepresent what runs |
 | The engine appends the count to a confirmation | A confirmation that fails to say how much it touches cannot be written |
