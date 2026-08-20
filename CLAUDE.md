@@ -7,7 +7,7 @@ with jq expressions (gojq).
 This replaces the earlier builtin-views design; the reasoning for the
 reversal is recorded in docs/architecture.md.
 
-**Status:** config loader (file or directory), engine pipeline, the table
+**Status:** the hat loader (a directory of YAML), engine pipeline, the table
 view with row selection, view and action parameters, and actions — both
 kinds — are built. Drill-down is an action that navigates; a working action
 gets a tab that collects its parameters, shows the commands, asks, and holds
@@ -101,7 +101,7 @@ charm.land/bubbletea/v2   charm.land/bubbles/v2   charm.land/lipgloss/v2
 ## Layout
 
 ```
-cmd/          cobra wiring: root (TUI), check, --config flag
+cmd/          cobra wiring: root (TUI), check, --hat flag
 internal/
   config/     YAML → typed defs, schema validation → engine.Def
   engine/     Compile(Def) → View, Link resolves navigating actions;
@@ -111,7 +111,7 @@ internal/
   tui/        model.go   bubbletea model, tabs, keys, mouse
               action.go  firing actions, confirmation, drill
               frame.go   framed boxes, tab bar, action bar
-examples/     example config; kept green by internal/config/example_test.go
+examples/     an example hat; kept green by internal/config/example_test.go
 docs/
 ```
 
@@ -120,8 +120,8 @@ docs/
 ```
 go build ./...
 go test ./...
-go run . -c examples/config.yaml         # TUI against the shipped examples
-go run . check -c examples/config.yaml   # validate a config
+go run . -h examples                     # TUI against the example hat
+go run . check -h examples               # validate a hat
 CGO_ENABLED=0 go build -o aldediggi .    # static, how it ships
 make                                     # lint (golangci-lint), test, build
 make release                             # macOS + Linux binaries in dist/

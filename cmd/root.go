@@ -14,7 +14,8 @@ import (
 	"github.com/vshn/aldediggi/internal/tui"
 )
 
-var cfgFlag string
+// hatFlag names the hat: the directory the views are taken out of.
+var hatFlag string
 
 // version is stamped by the build (see the Makefile's ldflags); "dev" is
 // what a plain `go run .` shows.
@@ -22,13 +23,13 @@ var version = "dev"
 
 var rootCmd = &cobra.Command{
 	Use:   "aldediggi",
-	Short: "Cluster diagnostic TUI driven by a YAML view config",
-	Long: "aldediggi renders views defined in a YAML config file: each view runs a\n" +
-		"script, reads a stream of JSON values from its stdout and shapes them\n" +
-		"into a table with jq expressions.",
+	Short: "Cluster diagnostic TUI driven by a hat full of YAML views",
+	Long: "aldediggi renders the views it pulls out of its hat — a directory of\n" +
+		"YAML files. Each view runs a script, reads a stream of JSON values from\n" +
+		"its stdout and shapes them into a table with jq expressions.",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		views, err := config.Load(configPath())
+		views, err := config.Load(hat())
 		if err != nil {
 			return err
 		}
@@ -46,9 +47,9 @@ var versionCmd = &cobra.Command{
 
 var checkCmd = &cobra.Command{
 	Use:   "check",
-	Short: "Validate the config file without starting the TUI",
+	Short: "Validate the hat without starting the TUI",
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		path := configPath()
+		path := hat()
 		views, err := config.Load(path)
 		if err != nil {
 			return err
@@ -58,27 +59,31 @@ var checkCmd = &cobra.Command{
 	},
 }
 
-// configPath resolves where the views come from: the flag, then the
-// environment, then the conventional place.
-func configPath() string {
-	if cfgFlag != "" {
-		return cfgFlag
+// hat resolves where the views are pulled from: the flag, then the
+// environment, then the conventional place. Every *.yaml in it is read, so
+// the views can be kept one file per group.
+func hat() string {
+	if hatFlag != "" {
+		return hatFlag
 	}
-	if env := os.Getenv("ALDEDIGGI_CONFIG"); env != "" {
+	if env := os.Getenv("ALDEDIGGI_HAT"); env != "" {
 		return env
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "config.yaml"
+		return "."
 	}
-	// The directory, not a file in it: loading a directory reads every
-	// *.yaml in it, so both a single config.yaml and one file per group work
-	// without the user having to say which they chose.
 	return filepath.Join(home, ".config", "aldediggi")
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&cfgFlag, "config", "c", "", "path to the view config file")
+	// Cobra hands -h to --help unless the flag already exists, and the hat
+	// has the better claim on it: help is asked for once, the hat on every
+	// invocation. --help still works, spelled out.
+	rootCmd.PersistentFlags().Bool("help", false, "show help")
+
+	rootCmd.PersistentFlags().StringVarP(&hatFlag, "hat", "h", "",
+		"directory the views are pulled out of")
 	rootCmd.AddCommand(checkCmd, versionCmd)
 }
 

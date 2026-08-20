@@ -48,9 +48,9 @@ Worth knowing: in POSIX sh, `a | b` reports `b`'s exit status, so a failing
 left end goes unnoticed. Use the bash override with `pipefail` when that
 matters.
 
-When views grow parameters (not built yet), they will be passed as
-**environment variables**, never templated into the script text — splicing
-user input into code is an injection hole; an environment variable is not.
+A view's parameters reach the script as **environment variables**, never
+templated into its text — splicing user input into code is an injection hole;
+an environment variable is not.
 
 ## Expressions are jq
 
@@ -216,12 +216,17 @@ Semantics that are easy to get wrong:
   display can lose the selection.
 - **Formats pass unparseable values through** instead of hiding them.
 
-The config lives at `~/.config/aldediggi/`, overridable with `--config`/`-c`
-or `$ALDEDIGGI_CONFIG`. A **directory** is read as every `*.yaml` in it, in
-name order, which keeps one file per group — `argo.yaml`, `upgrade.yaml`,
-`nodes.yaml`, `alerts.yaml`. A single file works just as well; pointing at
-the directory covers both. Actions are linked once every file has been read,
-so a view may open one declared in another.
+## The hat
+
+The views are pulled out of a **hat**: the directory named by `--hat`/`-h`,
+else `$ALDEDIGGI_HAT`, else `~/.config/aldediggi/`. Every `*.yaml` in it is
+read, in name order, which keeps one file per group — `argo.yaml`,
+`upgrade.yaml`, `nodes.yaml`, `alerts.yaml`. Actions are linked once every
+file has been read, so a view may open one declared in another. Naming a
+single file works too, for a hat with one thing in it.
+
+`-h` is the hat, not help: help is asked for once, the hat on every
+invocation. `--help` still works, spelled out.
 
 ## Errors: the price of a config engine, paid deliberately
 
@@ -276,7 +281,7 @@ only redraws when the tab comes forward.
 ## Layout
 
 ```
-cmd/               cobra wiring: root (TUI), check, --config
+cmd/               cobra wiring: root (TUI), check, --hat
 internal/
   config/          YAML → typed defs; schema validation; hands off to engine
   engine/          Def → compiled View; script runner, JSON stream decode,

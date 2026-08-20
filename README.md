@@ -53,9 +53,9 @@ call that produced it, and `esc` takes you back to the list untouched.
 ## Use
 
 ```
-aldediggi                  # TUI; config from ~/.config/aldediggi/
-aldediggi -c examples      # try it without a cluster (demo view included)
-aldediggi check            # validate the config without starting the TUI
+aldediggi                  # TUI; views from the hat at ~/.config/aldediggi/
+aldediggi -h examples      # try it without a cluster (demo view included)
+aldediggi check            # validate the hat without starting the TUI
 ```
 
 In the TUI: `⏎` runs the view under the cursor, `⇥` focuses the output,
@@ -82,4 +82,4 @@ make release      # static macOS and Linux binaries in dist/
 
 - [docs/architecture.md](docs/architecture.md) — pipeline, stdout contract,
   config schema, error philosophy, decisions
-- [examples/](examples/) — the shipped views, one file per group
+- [examples/](examples/) — an example hat, one file per group
