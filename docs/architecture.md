@@ -549,7 +549,7 @@ Dot directories are never hats: `.git` and `.github` both hold YAML.
 ## The hat
 
 The views are pulled out of a **hat**:
-the directory named by `--hat`/`-h`, else `$RINCEWIND_HAT`.
+the directory named by `--hat`, else `$RINCEWIND_HAT`.
 There is no third step, and that is deliberate.
 `~/.config/rincewind/` used to be a hat itself and is now the store,
 which it cannot be both:
@@ -575,9 +575,13 @@ installed with `rincewind hats install`.
 every view in it invents its own data,
 so it runs anywhere and is what the tests are pointed at.
 
-`-h` is the hat, not help:
-help is asked for once, the hat on every invocation.
-`--help` still works, spelled out.
+`--hat` has no short form.
+`-h` is help, everywhere, and a tool that takes it for something else
+costs every newcomer the same moment of confusion.
+It was the hat once, on the argument that help is asked for once
+and the hat on every invocation —
+which stopped being true when `$RINCEWIND_HAT` became how one is chosen
+for good, leaving only the broken convention.
 
 ## Errors: the price of a config engine, paid deliberately
 
@@ -750,7 +754,7 @@ example/           a hat that invents its data, and the config fixture
 | Per-row invocations replace the old `kubectl -f -` List document | Each call names one object, so a partial failure is attributable |
 | The argo "root rider" is an instruction, not a hidden mutation | The old pause silently patched `root` too; a mutation nobody selected is what the selection rule exists to prevent |
 | A hat is a directory, one file per group | Sixteen views in one file is unreadable; it is also how they were arranged as Go source |
-| `-h` is the hat, not help | Help is asked for once, the hat on every invocation |
+| `--hat` has no short form; `-h` is help | The frequency argument that once justified taking `-h` went away when `$RINCEWIND_HAT` became the way to choose a hat: what is left is a universal convention, broken for three saved characters |
 | The mouse toggle is `M`, not `m` | Lower-case letters belong to the views, which have far more use for them than one global toggle |
 | Planning is separate from running in the engine | The command can only be shown up front if producing it executes nothing |
 | A step is shown as env + shell + script, not one quoted line | The values never enter the script text; a quoted one-liner would misrepresent what runs |

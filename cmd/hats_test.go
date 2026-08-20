@@ -333,7 +333,7 @@ func TestNoHatSaysHowToChooseOne(t *testing.T) {
 	if err == nil {
 		t.Fatal("a hat was found where none was chosen")
 	}
-	for _, want := range []string{"-h <path>", "RINCEWIND_HAT", "hats install"} {
+	for _, want := range []string{"--hat <path>", "RINCEWIND_HAT", "hats install"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the error does not mention %q:\n%s", want, err)
 		}
