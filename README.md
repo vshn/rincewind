@@ -67,7 +67,7 @@ rincewind check                # validate the hat without starting the TUI
 rincewind view nodes.status    # print one view and exit, no TUI
 ```
 
-A hat is found with `-h`, else `$RINCEWIND_HAT`. There is no third step: with
+A hat is found with `--hat`, else `$RINCEWIND_HAT`. There is no third step: with
 neither given, rincewind says so and lists what is installed, rather than
 guessing which cluster you meant.
 

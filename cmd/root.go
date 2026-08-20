@@ -101,7 +101,7 @@ func hat() (string, error) {
 func noHat() error {
 	var b strings.Builder
 	b.WriteString("no hat chosen\n\n" +
-		"  -h <path>                     for one run\n" +
+		"  --hat <path>                    for one run\n" +
 		"  export " + envHat + "=<path>   for every run\n")
 
 	store := hats.Store{Dir: hats.DefaultDir("")}
@@ -121,13 +121,12 @@ func noHat() error {
 }
 
 func init() {
-	// Cobra hands -h to --help unless the flag already exists, and the hat
-	// has the better claim on it: help is asked for once, the hat on every
-	// invocation. --help still works, spelled out.
-	rootCmd.PersistentFlags().Bool("help", false, "show help")
-
-	rootCmd.PersistentFlags().StringVarP(&hatFlag, "hat", "h", "",
-		"directory the views are pulled out of")
+	// --hat has no short form: -h is help everywhere, and a tool that takes
+	// it for something else costs every newcomer the same moment of
+	// confusion. The hat is named rarely anyway, now that $RINCEWIND_HAT is
+	// how one is chosen for good.
+	rootCmd.PersistentFlags().StringVar(&hatFlag, "hat", "",
+		"directory the views are pulled out of (default $"+envHat+")")
 	rootCmd.AddCommand(checkCmd, versionCmd, viewCmd, hatsCmd)
 }
 

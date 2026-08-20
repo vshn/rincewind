@@ -35,7 +35,7 @@ var hatsCmd = &cobra.Command{
 	Use:   "hats",
 	Short: "Find, install and update hats",
 	Long: "Manage the store of installed hats: a directory of git clones.\n\n" +
-		"Nothing here resolves a hat by name — `-h` takes a path, and `hats list`\n" +
+		"Nothing here resolves a hat by name — `--hat` takes a path, and `hats list`\n" +
 		"prints the paths. Which hat runs by default is $RINCEWIND_HAT.",
 }
 
@@ -134,7 +134,7 @@ var hatsListCmd = &cobra.Command{
 			}
 		}
 		if last != "" {
-			say(out, "\nrun one with -h, or make it the default:\n\n  export RINCEWIND_HAT=%s\n", short(last))
+			say(out, "\nrun one with --hat, or make it the default:\n\n  export RINCEWIND_HAT=%s\n", short(last))
 		}
 		return nil
 	},
@@ -235,7 +235,7 @@ func report(out io.Writer, c hats.Clone) error {
 		return fmt.Errorf("no hat in %s loads", c.Slug)
 	}
 
-	say(out, "\nrun one with -h, or make it the default:\n\n  export RINCEWIND_HAT=%s\n", short(c.Hats[0].Path))
+	say(out, "\nrun one with --hat, or make it the default:\n\n  export RINCEWIND_HAT=%s\n", short(c.Hats[0].Path))
 	return nil
 }
 

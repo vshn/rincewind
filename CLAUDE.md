@@ -132,7 +132,8 @@ Both kinds of action open a tab; `esc` closes it.
   shows `git diff --stat` before applying;
   the topic search is discovery, never a registry.
   Do not add anything that fetches or updates by itself.
-- **`-h`, else `$RINCEWIND_HAT`, else refuse.**
+- **`--hat`, else `$RINCEWIND_HAT`, else refuse.**
+  No short form: `-h` is help, as everywhere else.
   `~/.config/rincewind` is the store, not a hat, and cannot be both.
   Never guess one of the installed hats.
 - **git and GitHub are named in Go only in `internal/hats`**,
@@ -178,9 +179,9 @@ docs/
 ```
 go build ./...
 go test ./...
-go run . -h example                       # invented data, no cluster needed
-go run . check -h example                 # validate a hat
-go run . view demo.services -h example    # print one view, no TUI
+go run . --hat example                    # invented data, no cluster needed
+go run . check --hat example              # validate a hat
+go run . view demo.services --hat example # print one view, no TUI
 go run . hats search                      # find hats on GitHub
 CGO_ENABLED=0 go build -o rincewind .    # static, how it ships
 make                                     # lint (golangci-lint), test, build
