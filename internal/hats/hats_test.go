@@ -146,6 +146,46 @@ func TestCloneFindsTheHats(t *testing.T) {
 	}
 }
 
+// A repository that is nothing but hats keeps them at its root, where a
+// hats/ level would only repeat the repository's own name — which is how
+// vshn/rincewind-hats is laid out.
+func TestHatsAtTheRepositoryRoot(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not on PATH")
+	}
+	dir := t.TempDir()
+	for _, name := range []string{"albedaran", "spare"} {
+		if err := os.MkdirAll(filepath.Join(dir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		write(t, filepath.Join(dir, name, "views.yaml"), oneView)
+	}
+	// A dot directory holds yaml too, and is never a hat.
+	if err := os.MkdirAll(filepath.Join(dir, ".github"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, ".github", "ci.yaml"), oneView)
+	write(t, filepath.Join(dir, "README.md"), "# hats\n")
+
+	run(t, dir, "init", "--initial-branch=main")
+	run(t, dir, "config", "user.email", "test@example.test")
+	run(t, dir, "config", "user.name", "Test")
+	commit(t, dir, "first")
+
+	c, err := store(t).Clone(context.Background(), Source{URL: dir, Slug: "github.com/vshn/rincewind-hats"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Hats) != 2 {
+		t.Fatalf("found %+v, want albedaran and spare", c.Hats)
+	}
+	for _, h := range c.Hats {
+		if strings.HasPrefix(h.Name, ".") {
+			t.Errorf("%s was taken for a hat", h.Name)
+		}
+	}
+}
+
 // A repository whose root is the hat, which is the one-hat case.
 func TestCloneWithoutHatsDirectory(t *testing.T) {
 	dir := t.TempDir()

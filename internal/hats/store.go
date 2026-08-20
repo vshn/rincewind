@@ -125,28 +125,46 @@ func listing(clones []Clone) string {
 	return strings.Join(out, "\n")
 }
 
-// hatsIn finds the hats in a clone. The convention is what this repository
-// already does — one directory per hat under hats/ — with a repository whose
-// root is itself a hat as the single-hat case. Nothing else is scanned, so
-// docs/ and .github/ cannot become hats by accident.
+// hatsIn finds the hats in a clone. Three layouts, tried in order, because
+// each is what someone would naturally write:
+//
+//   - hats/<name>/ — a repository that is something else as well, the way
+//     the rincewind repository holds its own two hats beside the source;
+//   - <name>/ at the root — a repository that is nothing but hats, where a
+//     hats/ level would only repeat the repository's own name;
+//   - *.yaml at the root — one repository, one hat.
+//
+// Dot directories are never hats: .git and .github both hold yaml.
 func hatsIn(clone, slug string) []Hat {
-	var out []Hat
+	if out := hatsUnder(filepath.Join(clone, "hats"), slug); len(out) > 0 {
+		return out
+	}
+	if out := hatsUnder(clone, slug); len(out) > 0 {
+		return out
+	}
+	if hasYAML(clone) {
+		return []Hat{{Name: filepath.Base(clone), Path: clone, Repo: slug}}
+	}
+	return nil
+}
 
-	if dirs, err := os.ReadDir(filepath.Join(clone, "hats")); err == nil {
-		for _, d := range dirs {
-			if !d.IsDir() {
-				continue
-			}
-			path := filepath.Join(clone, "hats", d.Name())
-			if hasYAML(path) {
-				out = append(out, Hat{Name: d.Name(), Path: path, Repo: slug})
-			}
+// hatsUnder collects the directories of dir that hold yaml.
+func hatsUnder(dir, slug string) []Hat {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+
+	var out []Hat
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		if hasYAML(path) {
+			out = append(out, Hat{Name: e.Name(), Path: path, Repo: slug})
 		}
 	}
-	if len(out) == 0 && hasYAML(clone) {
-		out = append(out, Hat{Name: filepath.Base(clone), Path: clone, Repo: slug})
-	}
-
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }

@@ -34,6 +34,35 @@ var hatsCmd = &cobra.Command{
 		"prints the paths. Which hat runs by default is $RINCEWIND_HAT.",
 }
 
+var hatsSearchCmd = &cobra.Command{
+	Use:   "search [words]",
+	Short: "Find repositories of hats on GitHub",
+	Long: "Search GitHub for repositories carrying the " + hats.Topic + " topic.\n\n" +
+		"The topic is self-assigned: anyone can put it on a repository, so this is\n" +
+		"discovery and not a registry. Read a hat before you install it.\n\n" +
+		"Set GITHUB_TOKEN to raise the ten-per-minute limit.",
+	Args: cobra.ArbitraryArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		repos, err := hats.Searcher{}.Search(cmd.Context(), strings.Join(args, " "))
+		if err != nil {
+			return err
+		}
+		out := cmd.OutOrStdout()
+		if len(repos) == 0 {
+			say(out, "nothing carries the %s topic yet\n", hats.Topic)
+			return nil
+		}
+
+		say(out, "\n")
+		for _, r := range repos {
+			say(out, "  %-34s %5d★  %s\n", r.Name, r.Stars, r.Description)
+		}
+		say(out, "\nanyone can add the %s topic, so this is discovery and not a registry\n\n  rincewind hats install %s\n",
+			hats.Topic, repos[0].Name)
+		return nil
+	},
+}
+
 var hatsInstallCmd = &cobra.Command{
 	Use:   "install <owner/repo | git-url>",
 	Short: "Clone a repository of hats into the store",
@@ -251,5 +280,5 @@ func init() {
 		"directory the hats are installed into (default $"+hats.EnvDir+", else ~/.config/rincewind)")
 	hatsCmd.PersistentFlags().BoolVarP(&yesFlag, "yes", "y", false, "do not ask")
 
-	hatsCmd.AddCommand(hatsInstallCmd, hatsListCmd, hatsUpdateCmd, hatsRemoveCmd)
+	hatsCmd.AddCommand(hatsSearchCmd, hatsInstallCmd, hatsListCmd, hatsUpdateCmd, hatsRemoveCmd)
 }
