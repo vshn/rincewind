@@ -17,8 +17,8 @@ shows the commands, asks, and holds the output.
 The previous generation's 16 views are ported except the two log views.
 TUI only.
 
-Not built yet: the two log views and the cluster-name probe,
-both deliberately deferred;
+Not built yet: the cluster-name probe, deliberately deferred;
+following a log, which needs a streaming source;
 batched (`once:`) actions; CLI output mode; stream views (following logs);
 `loki` and `pods`; a managed port-forward for `argo ui`.
 
@@ -32,6 +32,8 @@ pipeline, stdout contract, config schema, error philosophy, decisions table.
 A **view** is one entry in a hat's YAML:
 source script, `rows` and column jq expressions,
 sort, emphasis, parameters, actions.
+`class: text` takes the output as lines instead —
+a log, verbatim, with no rows and so no selection.
 
 An **action** does something with the rows a view is showing.
 One mechanism, two kinds:
@@ -65,6 +67,9 @@ Both kinds of action open a tab; `esc` closes it.
   and never take down the view.
   Script failures surface the script's stderr.
 - **Sort and emphasis work on raw jq values**, before formatting.
+- **A text view's lines are never reshaped.**
+  No `oneLine`, no column padding, no truncation:
+  the indentation is what a log is read by.
 - **Selection is keyed by `key`**, pruned against each new result.
 - **A mutation acts on the selection and refuses without one.**
   The filter is no longer the selector; `a` selects what it left.

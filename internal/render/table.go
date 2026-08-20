@@ -28,7 +28,7 @@ type Style struct {
 // widest cell and nothing is cut: a diagnostic tool that hides the end of a
 // message is worse than one you have to scroll. The terminal wraps, and the TUI
 // scrolls sideways.
-func Table(t engine.Table, style Style) []string {
+func Table(t engine.Result, style Style) []string {
 	widths := layout(t)
 
 	out := make([]string, 0, len(t.Rows)+1)
@@ -55,7 +55,7 @@ func Table(t engine.Table, style Style) []string {
 }
 
 // layout sizes each column to its widest cell.
-func layout(t engine.Table) []int {
+func layout(t engine.Result) []int {
 	widths := make([]int, len(t.Cols))
 	for i, c := range t.Cols {
 		widths[i] = lipgloss.Width(c)

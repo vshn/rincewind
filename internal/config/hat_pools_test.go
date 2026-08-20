@@ -156,7 +156,7 @@ esac
 	}
 }
 
-func rowSrc(t *testing.T, res engine.Table, i int) any {
+func rowSrc(t *testing.T, res engine.Result, i int) any {
 	t.Helper()
 	if i >= len(res.Rows) {
 		t.Fatalf("row %d of %d", i, len(res.Rows))

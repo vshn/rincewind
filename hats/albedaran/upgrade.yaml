@@ -294,3 +294,14 @@ views:
         expr: .reason
       - name: MESSAGE
         expr: .message
+
+  # The controller that drives the node rollout. A snapshot of the last 5000
+  # lines, not a follow: the tail is what one reads after a pool got stuck,
+  # and following it needs a streaming source the engine does not have yet.
+  - id: upgrade.logs
+    title: machine-config-controller log
+    class: text
+    source:
+      script: |
+        kubectl -n openshift-machine-config-operator logs \
+          deploy/machine-config-controller --tail 5000

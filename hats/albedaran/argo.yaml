@@ -49,6 +49,13 @@ views:
         args:
           app: .metadata.name
 
+      - key: l
+        name: logs
+        short: Show controller log lines about this application
+        open: argo.logs
+        args:
+          app: .metadata.name
+
       # The app-of-apps reverts a pause on its next sync, so it has to be
       # paused too. The old tool did that silently; saying it and letting the
       # operator select root is the same result without the hidden mutation.
@@ -123,6 +130,13 @@ views:
       - by: KIND
       - by: NAMESPACE/NAME
     actions:
+      - key: l
+        name: logs
+        short: Show controller log lines about this application
+        open: argo.logs
+        args:
+          app: $args.app
+
       # The rows here are resources, so the application comes from the view's
       # own parameter rather than from the row under the cursor.
       - key: R
@@ -133,3 +147,18 @@ views:
           kubectl -n syn --as system:admin annotate applications.argoproj.io "$app" \
             argocd.argoproj.io/refresh=normal --overwrite
         reload: true
+
+  # The application controller logs everything for every application at once,
+  # so the only way to read it is filtered down to one. grep, not jq: these
+  # are lines, not JSON.
+  - id: argo.logs
+    title: Controller log lines about one application
+    class: text
+    params:
+      - name: app
+        short: application name
+        required: true
+    source:
+      script: |
+        kubectl -n syn logs sts/syn-argocd-application-controller --tail 5000 \
+          | { grep -F "$app" || true; }

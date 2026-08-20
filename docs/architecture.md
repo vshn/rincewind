@@ -12,6 +12,8 @@ script  →  JSON value stream  →  rows expression  →  column projection  �
 The engine knows nothing about kubectl.
 It knows "run this script, expect JSON on stdout" —
 every piece of domain knowledge lives in the hat.
+A `class: text` view is the same pipeline with the shaping left out:
+the script's lines are the answer.
 
 ## The stdout contract
 
@@ -214,7 +216,7 @@ views:
                              # dot groups the sidebar, the rest is the menu
                              # label — an id without a dot is ungrouped
     title: Argo applications # description, shown in the title bar; default: id
-    class: table             # optional; only "table" exists so far
+    class: table             # optional; table (default) or text
     refresh: 30s             # optional auto-reload; manual r always works
     source:
       shell: [sh, -c]        # optional; this is the default
@@ -245,6 +247,33 @@ Semantics that are easy to get wrong:
   without a key expression the rendered cells stand in,
   and a reload that changes the display can lose the selection.
 - **Formats pass unparseable values through** instead of hiding them.
+
+## Text views
+
+`class: text` takes the script's stdout as lines rather than as JSON.
+It is what a log is:
+no `rows`, no `columns`, no `key`, no `sort` —
+those are refused rather than ignored,
+because a `rows:` nothing reads is a misunderstanding worth naming.
+
+The lines arrive **verbatim**.
+Nothing is collapsed, and no column is padded around them:
+in a log the indentation is part of what is being read,
+which is exactly why a log cannot be a one-column table.
+
+What still applies is what does not depend on rows.
+The filter greps the lines, and says how many of how many matched —
+which is most of what one does with a log.
+`↑↓`, `⇞⇟` and `home`/`end` scroll rather than moving a row cursor.
+What does not apply is everything that needs a row:
+there is no selection, no sticky header,
+and a view of this class may only carry `scope: none` actions,
+since there is no cursor row to navigate from and no selection to work on.
+
+A text view is still a **snapshot**: the script runs, prints, and exits.
+The two shipped log views read `--tail 5000`, as their predecessors did.
+Following a log needs a streaming source,
+which the engine does not have — see the non-goals below.
 
 ## The hat
 
@@ -417,6 +446,8 @@ hats/              albedaran (a real cluster), demo (invents its data)
 
 | Decision | Reason |
 |---|---|
+| A text view keeps its lines verbatim | Collapsing whitespace or padding a column would destroy the indentation a log is read by; that is why it is a class of its own rather than a one-column table |
+| A text view refuses rows, columns, sort and key | Accepting a field nothing reads teaches the wrong thing about the schema |
 | Views are config, not Go | The tool's owner wants to add views without recompiling; the error-message cost is paid explicitly (see above) |
 | Script is the only source form | One execution path; the hat shows exactly what runs, shell choice included |
 | stdout is a JSON stream | Multi-source views without forcing the script to merge |

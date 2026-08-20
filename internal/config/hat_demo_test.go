@@ -226,3 +226,68 @@ func TestHatDemoLinksAcrossFiles(t *testing.T) {
 		t.Errorf("the action opens %+v, want demo.instances from the other file", got)
 	}
 }
+
+// A text view's output is the answer, verbatim: no jq, and no collapsing of
+// whitespace, which is why a log cannot be a one-column table.
+func TestHatDemoTextViewKeepsItsLines(t *testing.T) {
+	view := viewByID(t, demoHat(t), "demo.log")
+
+	res, err := view.Run(t.Context(), engine.Args{"service": "api"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Text() {
+		t.Fatal("a text view produced rows")
+	}
+	if len(res.Rows) != 0 || res.Cols != nil {
+		t.Error("a text view produced columns as well")
+	}
+	if len(res.Lines) != 5 {
+		t.Fatalf("%d lines, want 5", len(res.Lines))
+	}
+	// The parameter reaches the script here too.
+	if !strings.Contains(res.Lines[0], "starting api") {
+		t.Errorf("first line is %q, want the parameter in it", res.Lines[0])
+	}
+	// The indented continuation keeps its indentation: that is the whole
+	// reason for the class.
+	if got := res.Lines[3]; !strings.HasPrefix(got, "    SELECT") {
+		t.Errorf("line 4 is %q, want its leading whitespace kept", got)
+	}
+}
+
+// The shipped log views are text, and reached the way the old tool reached
+// them: one from the menu, one by drilling in.
+func TestHatAlbedaranLogViews(t *testing.T) {
+	views, err := Load("../../hats/albedaran")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mco := viewByID(t, views, "upgrade.logs")
+	if !mco.Listed() {
+		t.Error("upgrade.logs needs no parameter, so it belongs in the menu")
+	}
+	argo := viewByID(t, views, "argo.logs")
+	if argo.Listed() {
+		t.Error("argo.logs needs an application, so it must not be in the menu")
+	}
+
+	// Both apps and syncstatus can reach it, the latter from its own
+	// parameter because its rows are resources.
+	for _, from := range []string{"argo.apps", "argo.syncstatus"} {
+		v := viewByID(t, views, from)
+		found := false
+		for _, a := range v.Actions {
+			if a.Name == "logs" {
+				found = true
+				if a.Open == nil || a.Open.ID != "argo.logs" {
+					t.Errorf("%s: logs opens %+v", from, a.Open)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s has no logs action", from)
+		}
+	}
+}

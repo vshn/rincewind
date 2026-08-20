@@ -14,25 +14,43 @@ import (
 	"time"
 )
 
+// runText is the whole of a text view: what the script printed, as lines.
+// No JSON, no jq, and no shaping — the point of the class is that the output
+// arrives as it was written.
+func (cv *compiled) runText(ctx context.Context, args Args) (Result, error) {
+	out, err := runScript(ctx, cv.shell, cv.def.Script, cv.env(args), nil)
+	if err != nil {
+		return Result{}, err
+	}
+
+	// Non-nil even when empty: that is what marks a result as text rather
+	// than as a table with no rows.
+	lines := []string{}
+	if trimmed := strings.TrimRight(string(out), "\n"); trimmed != "" {
+		lines = strings.Split(trimmed, "\n")
+	}
+	return Result{Lines: lines}, nil
+}
+
 // run is the whole pipeline for one view. Sorting happens on the raw
 // expression values, before formatting: an RFC 3339 timestamp orders
 // chronologically as a string, a number orders numerically — the rendered
 // cell would order neither.
-func (cv *compiled) run(ctx context.Context, args Args) (Table, error) {
+func (cv *compiled) run(ctx context.Context, args Args) (Result, error) {
 	env := cv.env(args)
 	out, err := runScript(ctx, cv.shell, cv.def.Script, env, nil)
 	if err != nil {
-		return Table{}, err
+		return Result{}, err
 	}
 
 	docs, err := decodeStream(out)
 	if err != nil {
-		return Table{}, err
+		return Result{}, err
 	}
 
 	raws, err := cv.extract(ctx, docs, args)
 	if err != nil {
-		return Table{}, err
+		return Result{}, err
 	}
 
 	sort.SliceStable(raws, func(i, j int) bool { return cv.less(raws[i], raws[j]) })
@@ -102,8 +120,8 @@ func (cv *compiled) extract(ctx context.Context, docs []any, args Args) ([]rawRo
 // render shapes the sorted raw rows into cells. Emphasis is matched against
 // the raw value, before formatting, so a rule targets the data rather than
 // however the cell happens to be displayed.
-func (cv *compiled) render(ctx context.Context, raws []rawRow, args Args, now time.Time) Table {
-	t := Table{Cols: make([]string, len(cv.cols))}
+func (cv *compiled) render(ctx context.Context, raws []rawRow, args Args, now time.Time) Result {
+	t := Result{Cols: make([]string, len(cv.cols))}
 	for i, col := range cv.cols {
 		t.Cols[i] = col.def.Name
 	}

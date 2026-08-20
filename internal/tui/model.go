@@ -74,7 +74,7 @@ type entry struct {
 // another tab.
 type resultMsg struct {
 	seq int
-	res engine.Table
+	res engine.Result
 	err error
 }
 
@@ -110,7 +110,7 @@ type tab struct {
 	view *engine.View
 	args engine.Args
 
-	res *engine.Table
+	res *engine.Result
 	err error
 
 	// row is the data row the output-pane cursor is on.
@@ -360,14 +360,37 @@ func (m *model) selected() *engine.View {
 }
 
 // visible is the result after filtering: what the output pane renders.
-func (m *model) visible() engine.Table {
+func (m *model) visible() engine.Result {
 	if m.cur().res == nil {
-		return engine.Table{}
+		return engine.Result{}
 	}
 	return filtered(*m.cur().res, m.filter.Value())
 }
 
 func (m *model) rowCount() int { return len(m.visible().Rows) }
+
+// shownCount is how much the output pane is showing, of whichever kind: the
+// filter's count and "nothing to show" mean the same thing either way.
+func (m *model) shownCount() int {
+	vis := m.visible()
+	if vis.Text() {
+		return len(vis.Lines)
+	}
+	return len(vis.Rows)
+}
+
+// total is how much there was before the filter.
+func (m *model) total() int {
+	t := m.cur()
+	switch {
+	case t.res == nil:
+		return 0
+	case t.res.Text():
+		return len(t.res.Lines)
+	default:
+		return len(t.res.Rows)
+	}
+}
 
 func (m *model) Init() tea.Cmd { return nil }
 
@@ -774,10 +797,10 @@ func (m *model) entryAt(y int) int {
 }
 
 // toggleFocus moves the keyboard between the list and the output. Only worth
-// doing when the output has rows to land on.
+// doing when the output has something to land on — rows, or a log's lines.
 func (m *model) toggleFocus() {
 	if m.focus == paneList {
-		if m.rowCount() == 0 {
+		if m.shownCount() == 0 {
 			return
 		}
 		m.focus, m.cur().row = paneOutput, 0
@@ -792,6 +815,17 @@ func (m *model) move(step int) {
 	if m.focus == paneList {
 		m.cursor = m.next(m.cursor, step)
 		m.syncSidebar()
+		return
+	}
+
+	// A text view has no row to move: the keys scroll it, which is what one
+	// wants from a log anyway.
+	if m.hasText() {
+		if step < 0 {
+			m.vp.ScrollUp(-step)
+		} else {
+			m.vp.ScrollDown(step)
+		}
 		return
 	}
 
@@ -825,6 +859,15 @@ func (m *model) jump(dir int) {
 			m.cursor = m.next(len(m.entries), -1)
 		}
 		m.syncSidebar()
+		return
+	}
+
+	if m.hasText() {
+		if dir < 0 {
+			m.vp.GotoTop()
+		} else {
+			m.vp.GotoBottom()
+		}
 		return
 	}
 
@@ -1138,10 +1181,18 @@ func (m *model) vpHeight() int {
 }
 
 // hasTable reports whether the content box is showing rows, as opposed to a
-// job, a spinner, an error or a note that there is nothing to see.
+// job, a text view, a spinner, an error or a note that there is nothing to
+// see. Only rows get a sticky header and a row cursor.
 func (m *model) hasTable() bool {
 	t := m.cur()
-	return t.job == nil && t.err == nil && !t.running && t.res != nil && m.rowCount() > 0
+	return t.job == nil && t.err == nil && !t.running &&
+		t.res != nil && !t.res.Text() && m.rowCount() > 0
+}
+
+// hasText reports whether the content box is showing a text view's lines.
+func (m *model) hasText() bool {
+	t := m.cur()
+	return t.job == nil && t.err == nil && !t.running && t.res != nil && t.res.Text()
 }
 
 // statusLines is the room the status bar takes, so the viewport shrinks
@@ -1159,13 +1210,24 @@ func (m *model) resize() {
 }
 
 // filtered narrows a table to the rows that match.
-func filtered(t engine.Table, needle string) engine.Table {
+func filtered(t engine.Result, needle string) engine.Result {
 	needle = strings.ToLower(strings.TrimSpace(needle))
 	if needle == "" {
 		return t
 	}
 
-	out := engine.Table{Cols: t.Cols, Notes: t.Notes}
+	// Filtering a log is grep, and is most of what one does with one.
+	if t.Text() {
+		out := engine.Result{Lines: []string{}, Notes: t.Notes}
+		for _, line := range t.Lines {
+			if strings.Contains(strings.ToLower(line), needle) {
+				out.Lines = append(out.Lines, line)
+			}
+		}
+		return out
+	}
+
+	out := engine.Result{Cols: t.Cols, Notes: t.Notes}
 	for _, row := range t.Rows {
 		parts := make([]string, len(row.Cells))
 		for i, c := range row.Cells {
@@ -1196,6 +1258,15 @@ func (m *model) showResult() {
 
 	vis := m.visible()
 
+	// A text view's lines go in as they came out of the script: no header,
+	// no styling, no truncation. Whitespace is part of what is being read.
+	if vis.Text() {
+		m.head = ""
+		m.vp.SetContentLines(vis.Lines)
+		m.lines = len(vis.Lines)
+		return
+	}
+
 	cursor := -1
 	if m.focus == paneOutput && len(vis.Rows) > 0 {
 		m.clampRow()
@@ -1221,7 +1292,7 @@ func (m *model) showResult() {
 // tableStyle paints emphasis, the row cursor and the selection. Emphasis
 // colours are dropped on highlighted rows: a highlight has to survive the
 // whole line, and the reset at the end of a coloured cell would cut it short.
-func (m *model) tableStyle(vis engine.Table, cursor int) render.Style {
+func (m *model) tableStyle(vis engine.Result, cursor int) render.Style {
 	return render.Style{
 		Header: func(s string) string { return headerStyle.Render(s) },
 		Cell: func(row int, e engine.Emphasis, s string) string {
@@ -1392,6 +1463,9 @@ func (m *model) contentLines() []string {
 	case m.hasTable():
 		lines = append(lines, m.headLine())
 		lines = append(lines, strings.Split(m.vp.View(), "\n")...)
+	case m.hasText() && m.shownCount() > 0:
+		// No sticky header: there are no column names to keep.
+		lines = strings.Split(m.vp.View(), "\n")
 	default:
 		lines = strings.Split(m.pane(), "\n")
 	}
@@ -1475,8 +1549,9 @@ func (m *model) pane() string {
 		return helpStyle.Render("press ⏎ to run")
 	}
 
-	// A table of nothing but headers reads like a failure. Say which it is.
-	if m.rowCount() == 0 {
+	// A table of nothing but headers, or a log with no lines, reads like a
+	// failure. Say which it is.
+	if m.shownCount() == 0 {
 		if m.filter.Value() != "" {
 			return helpStyle.Render("nothing matches " + m.filter.Value())
 		}
@@ -1497,7 +1572,7 @@ func (m *model) statusLine() string {
 		parts = append(parts, dividerStyle.Render("/"+m.filter.Value()))
 	}
 	if m.cur().res != nil && (m.filtering || m.filter.Value() != "") {
-		parts = append(parts, dividerStyle.Render(fmt.Sprintf("%d of %d", m.rowCount(), len(m.cur().res.Rows))))
+		parts = append(parts, dividerStyle.Render(fmt.Sprintf("%d of %d", m.shownCount(), m.total())))
 	}
 	if n := len(m.cur().selection); n > 0 {
 		parts = append(parts, warnStyle.Render(fmt.Sprintf("%d selected", n)))

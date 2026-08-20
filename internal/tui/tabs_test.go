@@ -28,7 +28,7 @@ func drilling(t *testing.T) (*model, *record) {
 
 // deliver runs whatever the active tab has in flight and injects its result,
 // standing in for the tea.Cmd the program would have run.
-func deliver(t *testing.T, m *model, res engine.Table) {
+func deliver(t *testing.T, m *model, res engine.Result) {
 	t.Helper()
 	m.Update(resultMsg{seq: m.cur().seq, res: res})
 }
@@ -133,7 +133,7 @@ func TestDrillIgnoresTheSelection(t *testing.T) {
 // attempt, so it shows where the attempt went.
 func TestDrillArgumentErrorBecomesTheNewTabsError(t *testing.T) {
 	m, _ := drilling(t)
-	broken := engine.Table{Cols: []string{"NAME", "STATE"}, Rows: []engine.Row{poolRow("odd", "broken")}}
+	broken := engine.Result{Cols: []string{"NAME", "STATE"}, Rows: []engine.Row{poolRow("odd", "broken")}}
 	m.Update(resultMsg{seq: m.cur().seq, res: broken})
 
 	m.Update(key("enter"))

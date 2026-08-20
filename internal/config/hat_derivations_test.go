@@ -36,7 +36,7 @@ echo '{"items":[]}'
 	return dir
 }
 
-func cellAt(t *testing.T, res engine.Table, row int, col string) string {
+func cellAt(t *testing.T, res engine.Result, row int, col string) string {
 	t.Helper()
 	for i, c := range res.Cols {
 		if c == col {

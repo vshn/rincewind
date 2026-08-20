@@ -153,6 +153,21 @@ func TestBrokenActionsFailWithContext(t *testing.T) {
 			want: []string{"demo.pools", "no name"},
 		},
 		{
+			name: "text view with rows",
+			yaml: strings.Replace(valid, "    rows: .items[]", "    class: text\n    rows: .items[]", 1),
+			want: []string{"demo.list", "rows is not read"},
+		},
+		{
+			name: "text view with columns",
+			yaml: strings.Replace(valid, "    rows: .items[]\n    key: .name\n", "    class: text\n", 1),
+			want: []string{"demo.list", "columns are not read"},
+		},
+		{
+			name: "unknown class",
+			yaml: strings.Replace(valid, "    rows: .items[]", "    class: chart\n    rows: .items[]", 1),
+			want: []string{"demo.list", "chart", "table or text"},
+		},
+		{
 			name: "unknown scope",
 			yaml: strings.Replace(withActions, "      - key: p", "      - scope: sideways\n        key: p", 1),
 			want: []string{"demo.pools", "pause", "sideways", "not rows or none"},

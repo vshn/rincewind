@@ -62,6 +62,9 @@ rincewind --hat ./hats/demo    # try it without a cluster (demo view included)
 rincewind check                # validate the hat without starting the TUI
 ```
 
+A view whose output is a log rather than a table is `class: text`:
+the lines arrive verbatim, `/` greps them, and the arrows scroll.
+
 In the TUI: `⏎` runs the view under the cursor, `⇥` focuses the output,
 `/` filters, `space`/`a` select rows, `r` reloads, `q` quits.
 In the output pane the view's own action keys apply —
@@ -94,5 +97,6 @@ make release      # all four release binaries in dist/, without publishing
 
 ## Licence
 
-Apache 2.0, the same as its sibling [gandalf](https://github.com/appuio/gandalf).
+Apache 2.0,
+the same as its sibling [gandalf](https://github.com/appuio/gandalf).
 See [LICENSE](LICENSE).

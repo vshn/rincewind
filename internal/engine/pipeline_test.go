@@ -9,7 +9,7 @@ import (
 
 // runDef compiles and runs a definition against a real shell; the scripts
 // only echo fixture JSON, so the tests cover the same path production does.
-func runDef(t *testing.T, d Def) Table {
+func runDef(t *testing.T, d Def) Result {
 	t.Helper()
 	v, err := Compile(d)
 	if err != nil {

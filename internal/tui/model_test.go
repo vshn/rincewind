@@ -129,7 +129,7 @@ func TestStaleResultIsIgnored(t *testing.T) {
 	m.Update(key("enter"))
 	current := m.seq
 
-	stale := engine.Table{Cols: []string{"N"}, Rows: []engine.Row{row("stale")}}
+	stale := engine.Result{Cols: []string{"N"}, Rows: []engine.Row{row("stale")}}
 	m.Update(resultMsg{seq: current - 1, res: stale})
 
 	if !m.cur().running {

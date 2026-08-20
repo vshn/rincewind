@@ -18,8 +18,8 @@ func row(cells ...string) engine.Row {
 	return r
 }
 
-func nodesTable() engine.Table {
-	return engine.Table{
+func nodesTable() engine.Result {
+	return engine.Result{
 		Cols: []string{"NAME", "STATUS", "AGE", "MESSAGE"},
 		Rows: []engine.Row{
 			row("worker-01", "Ready", "12d", "kubelet is posting ready status"),
@@ -32,8 +32,8 @@ func nodesTable() engine.Table {
 
 // longTable is taller and wider than any test window, which is what the
 // scrolling tests need.
-func longTable() engine.Table {
-	t := engine.Table{Cols: []string{"NAME", "STATUS", "MESSAGE"}}
+func longTable() engine.Result {
+	t := engine.Result{Cols: []string{"NAME", "STATUS", "MESSAGE"}}
 	for i := 1; i <= 40; i++ {
 		t.Rows = append(t.Rows, row(
 			fmt.Sprintf("worker-%02d", i), "Ready",
@@ -49,7 +49,7 @@ func manyViews() []engine.View {
 		name := fmt.Sprintf("view%02d", i)
 		out = append(out, engine.View{
 			ID: "demo." + name, Name: name, Title: name, Group: "demo",
-			Run: func(context.Context, engine.Args) (engine.Table, error) { return longTable(), nil },
+			Run: func(context.Context, engine.Args) (engine.Result, error) { return longTable(), nil },
 		})
 	}
 	return out
@@ -65,8 +65,8 @@ func poolRow(name, state string) engine.Row {
 	}
 }
 
-func poolTable() engine.Table {
-	return engine.Table{
+func poolTable() engine.Result {
+	return engine.Result{
 		Cols: []string{"NAME", "STATE"},
 		Rows: []engine.Row{poolRow("infra", "Degraded"), poolRow("worker", "Updated")},
 	}
@@ -113,7 +113,7 @@ func drillViews(rec *record) []engine.View {
 	target := engine.View{
 		ID: "demo.nodes", Name: "nodes", Title: "Nodes", Group: "demo",
 		Params: []engine.Param{{Name: "selector", Required: true}},
-		Run: func(_ context.Context, args engine.Args) (engine.Table, error) {
+		Run: func(_ context.Context, args engine.Args) (engine.Result, error) {
 			rec.args = append(rec.args, args)
 			return longTable(), nil
 		},
@@ -121,7 +121,7 @@ func drillViews(rec *record) []engine.View {
 
 	parent := engine.View{
 		ID: "demo.pools", Name: "pools", Title: "Pools", Group: "demo",
-		Run: func(context.Context, engine.Args) (engine.Table, error) {
+		Run: func(context.Context, engine.Args) (engine.Result, error) {
 			rec.parent++
 			return poolTable(), nil
 		},
@@ -175,6 +175,26 @@ func drillViews(rec *record) []engine.View {
 	return []engine.View{parent, target}
 }
 
+// logLines is a text view's output: long enough to scroll, with one line
+// whose indentation must survive.
+func logLines() []string {
+	out := []string{"    indented continuation line"}
+	for i := 1; i <= 40; i++ {
+		out = append(out, fmt.Sprintf("2026-08-20T07:%02d:00Z INFO  event %02d on worker-%02d", i, i, i))
+	}
+	return append(out, "2026-08-20T08:00:00Z ERROR liveness probe failed")
+}
+
+// textViews is one text view, for the paths that have no rows at all.
+func textViews() []engine.View {
+	return []engine.View{{
+		ID: "demo.log", Name: "log", Title: "A log", Group: "demo",
+		Run: func(context.Context, engine.Args) (engine.Result, error) {
+			return engine.Result{Lines: logLines()}, nil
+		},
+	}}
+}
+
 // sampleViews is the stand-in the layout and interaction tests run against.
 // In-memory views rather than parsed config, so the tests need no shell; the
 // engine's own tests cover the script path.
@@ -182,8 +202,8 @@ func sampleViews() []engine.View {
 	return []engine.View{
 		{
 			ID: "demo.quick", Name: "quick", Title: "One quick row", Group: "demo",
-			Run: func(context.Context, engine.Args) (engine.Table, error) {
-				return engine.Table{
+			Run: func(context.Context, engine.Args) (engine.Result, error) {
+				return engine.Result{
 					Cols: []string{"N"},
 					Rows: []engine.Row{row("123")},
 				}, nil
@@ -193,11 +213,11 @@ func sampleViews() []engine.View {
 			ID: "demo.nodes", Name: "nodes", Title: "Nodes after a delay", Group: "demo",
 			// The delay is what makes it possible to check that the UI keeps
 			// painting and accepting keys while work is in flight.
-			Run: func(ctx context.Context, _ engine.Args) (engine.Table, error) {
+			Run: func(ctx context.Context, _ engine.Args) (engine.Result, error) {
 				select {
 				case <-time.After(50 * time.Millisecond):
 				case <-ctx.Done():
-					return engine.Table{}, ctx.Err()
+					return engine.Result{}, ctx.Err()
 				}
 				return nodesTable(), nil
 			},
