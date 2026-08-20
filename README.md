@@ -34,8 +34,9 @@ aldediggi check                  # validate the config without starting the TUI
 ```
 
 In the TUI: `⏎` runs the view under the cursor, `⇥` focuses the output,
-`/` filters, `space`/`a` select rows, `r` reloads, `<` `>` scroll wide
-tables, `q` quits.
+`/` filters, `space`/`a` select rows, `r` reloads, `q` quits.
+Both panes scroll: `↑↓`, `⇞`/`⇟` by the screenful, `home`/`end` to the ends,
+and `<` `>` sideways through wide tables — the column names stay put.
 
 ## Build
 

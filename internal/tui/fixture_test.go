@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/vshn/aldediggi/internal/engine"
@@ -27,6 +28,31 @@ func nodesTable() engine.Table {
 			row("master-000000", "Ready", "1y", "kubelet is posting ready status"),
 		},
 	}
+}
+
+// longTable is taller and wider than any test window, which is what the
+// scrolling tests need.
+func longTable() engine.Table {
+	t := engine.Table{Cols: []string{"NAME", "STATUS", "MESSAGE"}}
+	for i := 1; i <= 40; i++ {
+		t.Rows = append(t.Rows, row(
+			fmt.Sprintf("worker-%02d", i), "Ready",
+			"kubelet is posting ready status and some more text to make this wide"))
+	}
+	return t
+}
+
+// manyViews fills the sidebar past the bottom of its box.
+func manyViews() []engine.View {
+	var out []engine.View
+	for i := 1; i <= 30; i++ {
+		name := fmt.Sprintf("view%02d", i)
+		out = append(out, engine.View{
+			ID: "demo." + name, Name: name, Title: name, Group: "demo",
+			Run: func(context.Context) (engine.Table, error) { return longTable(), nil },
+		})
+	}
+	return out
 }
 
 // sampleViews is the stand-in the layout and interaction tests run against.

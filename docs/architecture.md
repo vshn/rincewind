@@ -159,6 +159,19 @@ examples/          shipped example config, kept green by a test
   discards results of superseded runs, and one spinner tick chain is kept
   alive at a time.
 - The run timeout (30s) is the TUI's policy; the engine just honours ctx.
+- The screen is four framed boxes: title, sidebar and content side by side,
+  and a split footer — version on the sidebar's width, key legend on the
+  content's. The frames are drawn by hand rather than with lipgloss borders,
+  because the content box carries labels *inside* its top border: the view's
+  tab on the left (drill-down will add more) and the scroll position on the
+  right, where it costs no row of the table it describes.
+- The table header is held **outside** the viewport and painted onto the
+  box's first row, shifted by the viewport's own `XOffset`. Scrolling a long
+  table must never cost the column names. Both panes scroll: the viewport
+  follows the row cursor to the edge rather than recentring, and the sidebar
+  windows onto the menu the same way.
+- The key legend is weighted: when the footer box is too narrow the lightest
+  keys are dropped rather than the line being clipped mid-word.
 - Tests drive `model.Update` with synthetic messages and assert on
   `View().Content` — no terminal, no golden files. The fixture views are
   built in memory; one of them sleeps, which is how the tests check that

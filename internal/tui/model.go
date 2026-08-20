@@ -14,6 +14,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/vshn/aldediggi/internal/engine"
 	"github.com/vshn/aldediggi/internal/render"
@@ -108,6 +109,16 @@ type model struct {
 
 	vp    viewport.Model
 	ready bool
+
+	// head is the table's header line. It is kept out of the viewport and
+	// painted onto the frame's first row, so scrolling down never costs the
+	// column names — which is most of what makes a wide table readable.
+	head string
+	// lines is how many lines the viewport holds, for the position label.
+	lines int
+	// sideTop is the first sidebar line on screen, for menus taller than
+	// their box.
+	sideTop int
 
 	seq     int
 	running bool
@@ -363,6 +374,22 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.move(+1)
 		return m, nil
 
+	case "pgdown", "ctrl+f":
+		m.page(+1)
+		return m, nil
+
+	case "pgup", "ctrl+b":
+		m.page(-1)
+		return m, nil
+
+	case "home", "g":
+		m.jump(-1)
+		return m, nil
+
+	case "end", "G":
+		m.jump(+1)
+		return m, nil
+
 	case "r":
 		return m, m.reload()
 
@@ -405,6 +432,7 @@ func (m *model) toggleFocus() {
 func (m *model) move(step int) {
 	if m.focus == paneList {
 		m.cursor = m.next(m.cursor, step)
+		m.syncSidebar()
 		return
 	}
 
@@ -412,6 +440,78 @@ func (m *model) move(step int) {
 		m.row = min(max(m.row+step, 0), n-1)
 		m.showResult()
 	}
+}
+
+// page moves a screenful in either direction. The cursor travels with it:
+// scrolling the view out from under the cursor would leave the next space
+// or action pointing at a row nobody is looking at.
+func (m *model) page(dir int) {
+	h := max(m.vp.Height(), 1)
+	if m.focus == paneList {
+		for range h {
+			m.cursor = m.next(m.cursor, dir)
+		}
+		m.syncSidebar()
+		return
+	}
+	m.move(dir * h)
+}
+
+// jump goes to the first or last entry.
+func (m *model) jump(dir int) {
+	if m.focus == paneList {
+		if dir < 0 {
+			m.cursor = m.next(-1, +1)
+		} else {
+			m.cursor = m.next(len(m.entries), -1)
+		}
+		m.syncSidebar()
+		return
+	}
+
+	if n := m.rowCount(); n > 0 {
+		if dir < 0 {
+			m.row = 0
+		} else {
+			m.row = n - 1
+		}
+		m.showResult()
+	}
+}
+
+// follow scrolls the viewport just enough to keep the row cursor in sight,
+// stopping at the edge rather than recentring: a table that jumps under the
+// eye is harder to read than one that creeps.
+func (m *model) follow(cursor int) {
+	if cursor < 0 {
+		return
+	}
+	h := max(m.vp.Height(), 1)
+	switch top := m.vp.YOffset(); {
+	case cursor < top:
+		m.vp.SetYOffset(cursor)
+	case cursor >= top+h:
+		m.vp.SetYOffset(cursor - h + 1)
+	}
+}
+
+// syncSidebar slides the menu window to keep the cursor on screen. Kept out
+// of the render so that drawing the sidebar stays free of side effects.
+func (m *model) syncSidebar() {
+	lines, cursor := m.sidebarRender()
+	h := max(m.bodyBoxHeight()-2, 1)
+
+	if len(lines) <= h || cursor < 0 {
+		m.sideTop = 0
+		return
+	}
+	switch {
+	case cursor < m.sideTop:
+		m.sideTop = cursor
+	case cursor >= m.sideTop+h:
+		m.sideTop = cursor - h + 1
+	}
+	m.sideTop = min(max(m.sideTop, 0), len(lines)-h)
 }
 
 // toggleRow flips the selection of the row under the cursor and moves on,
@@ -562,9 +662,19 @@ func (m *model) bodyBoxHeight() int {
 }
 
 // vpHeight is the viewport's share of the content box: the inner height,
-// minus the status line when one is showing.
+// minus the sticky header and the status line when those are showing.
 func (m *model) vpHeight() int {
-	return max(m.bodyBoxHeight()-2-m.statusLines(), 1)
+	h := m.bodyBoxHeight() - 2 - m.statusLines()
+	if m.hasTable() {
+		h--
+	}
+	return max(h, 1)
+}
+
+// hasTable reports whether the content box is showing rows, as opposed to a
+// spinner, an error or a note that there is nothing to see.
+func (m *model) hasTable() bool {
+	return m.err == nil && !m.running && m.res != nil && m.rowCount() > 0
 }
 
 // statusLines is the room the status bar takes, so the viewport shrinks
@@ -578,6 +688,7 @@ func (m *model) statusLines() int {
 
 func (m *model) resize() {
 	m.showResult()
+	m.syncSidebar()
 }
 
 // filtered narrows a table to the rows that match.
@@ -601,12 +712,9 @@ func filtered(t engine.Table, needle string) engine.Table {
 }
 
 // showResult feeds the current result into the viewport. The widget is
-// re-sized here rather than only on window changes, because the status line
-// coming and going alters the viewport's share of the frame.
+// re-sized here rather than only on window changes, because the header and
+// the status line coming and going alter the viewport's share of the frame.
 func (m *model) showResult() {
-	m.vp.SetWidth(m.contentWidth())
-	m.vp.SetHeight(m.vpHeight())
-
 	vis := m.visible()
 
 	cursor := -1
@@ -616,6 +724,9 @@ func (m *model) showResult() {
 	}
 
 	lines := render.Table(vis, m.tableStyle(vis, cursor))
+	// The header comes out of the scrolling area and is painted onto the
+	// frame's first row instead.
+	m.head, lines = lines[0], lines[1:]
 
 	// Cell evaluation problems ride below the table instead of replacing
 	// it: a half-broken view is still mostly a view.
@@ -623,7 +734,11 @@ func (m *model) showResult() {
 		lines = append(lines, noteStyle.Render("! "+note))
 	}
 
+	m.vp.SetWidth(m.contentWidth())
+	m.vp.SetHeight(m.vpHeight())
 	m.vp.SetContentLines(lines)
+	m.lines = len(lines)
+	m.follow(cursor)
 }
 
 // tableStyle paints emphasis, the row cursor and the selection. Emphasis
@@ -654,25 +769,24 @@ func (m *model) tableStyle(vis engine.Table, cursor int) render.Style {
 }
 
 // frame draws a w×h box around lines, rounded corners, one space of padding
-// inside. label, when given, rides in the top border the way a tab does —
-// a future drill-down grows into a row of them, not into a new layout.
-func frame(lines []string, w, h int, bs lipgloss.Style, label string) string {
+// inside. Labels ride in the top border: left is the tab — a future
+// drill-down grows into a row of them, not into a new layout — and right is
+// the scroll position, which belongs on the frame rather than costing a line
+// of the content it describes.
+func frame(lines []string, w, h int, bs lipgloss.Style, left, right string) string {
 	w, h = max(w, boxPad), max(h, 2)
 	inner := w - 2    // between the border columns
 	text := inner - 2 // minus the padding spaces
 	clip := lipgloss.NewStyle().MaxWidth(text)
 
-	top := "╭" + strings.Repeat("─", inner) + "╮"
-	if label != "" {
-		label = lipgloss.NewStyle().MaxWidth(max(text-1, 0)).Render(label)
-		fill := max(inner-1-lipgloss.Width(label), 0)
-		top = bs.Render("╭─") + label + bs.Render(strings.Repeat("─", fill)+"╮")
-	} else {
-		top = bs.Render(top)
-	}
+	// Both labels are clipped before the fill is measured, so a narrow
+	// window can never push the corner off the end of the line.
+	left = lipgloss.NewStyle().MaxWidth(max(text-1, 0)).Render(left)
+	right = lipgloss.NewStyle().MaxWidth(max(text-1-lipgloss.Width(left), 0)).Render(right)
+	fill := max(inner-1-lipgloss.Width(left)-lipgloss.Width(right), 0)
 
 	out := make([]string, 0, h)
-	out = append(out, top)
+	out = append(out, bs.Render("╭─")+left+bs.Render(strings.Repeat("─", fill))+right+bs.Render("╮"))
 	side := bs.Render("│")
 	for i := 0; i < h-2; i++ {
 		line := ""
@@ -703,16 +817,16 @@ func (m *model) View() tea.View {
 		outBorder = focusBorder
 	}
 
-	title := frame([]string{m.titleLine()}, m.width, 3, borderStyle, "")
+	title := frame([]string{m.titleLine()}, m.width, 3, borderStyle, "", "")
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top,
-		frame(m.sidebarLines(), sidebarWidth, m.bodyBoxHeight(), sideBorder, ""),
-		frame(m.contentLines(), m.width-sidebarWidth, m.bodyBoxHeight(), outBorder, m.tabLabel()),
+		frame(m.sidebarLines(), sidebarWidth, m.bodyBoxHeight(), sideBorder, "", m.sidebarMore()),
+		frame(m.contentLines(), m.width-sidebarWidth, m.bodyBoxHeight(), outBorder, m.tabLabel(), m.scrollLabel()),
 	)
 
 	footer := lipgloss.JoinHorizontal(lipgloss.Top,
-		frame([]string{descStyle.Render(m.version)}, sidebarWidth, 3, borderStyle, ""),
-		frame([]string{m.help()}, m.width-sidebarWidth, 3, borderStyle, ""),
+		frame([]string{descStyle.Render(m.version)}, sidebarWidth, 3, borderStyle, "", ""),
+		frame([]string{m.help()}, m.width-sidebarWidth, 3, borderStyle, "", ""),
 	)
 
 	v.Content = lipgloss.JoinVertical(lipgloss.Left, title, body, footer)
@@ -761,10 +875,40 @@ func (m *model) tabLabel() string {
 	return tabStyle.Render(" " + label + " ")
 }
 
-// contentLines is what the content frame holds: the pane, with the status
-// line pinned to the frame's bottom edge when there is one.
+// scrollLabel says where in the table the view sits. It rides in the top
+// border because a position indicator that costs a row of the content it
+// describes is a poor trade.
+func (m *model) scrollLabel() string {
+	h := m.vp.Height()
+	if !m.hasTable() || m.lines <= h {
+		return ""
+	}
+	top := m.vp.YOffset()
+	return dividerStyle.Render(fmt.Sprintf(" %d–%d/%d ", top+1, min(top+h, m.lines), m.lines))
+}
+
+// sidebarMore marks a menu taller than its box, so a view below the fold is
+// not simply invisible.
+func (m *model) sidebarMore() string {
+	lines, _ := m.sidebarRender()
+	if len(lines) <= max(m.bodyBoxHeight()-2, 1) {
+		return ""
+	}
+	return dividerStyle.Render(" ↕ ")
+}
+
+// contentLines is what the content frame holds: the sticky header, the
+// scrolling pane, and the status line pinned to the frame's bottom edge
+// when there is one.
 func (m *model) contentLines() []string {
-	lines := strings.Split(m.pane(), "\n")
+	var lines []string
+	if m.hasTable() {
+		lines = append(lines, m.headLine())
+		lines = append(lines, strings.Split(m.vp.View(), "\n")...)
+	} else {
+		lines = strings.Split(m.pane(), "\n")
+	}
+
 	if status := m.statusLine(); status != "" {
 		inner := m.bodyBoxHeight() - 2
 		for len(lines) < inner-1 {
@@ -775,24 +919,51 @@ func (m *model) contentLines() []string {
 	return lines
 }
 
-func (m *model) sidebarLines() []string {
-	var out []string
+// headLine paints the table header, shifted along with whatever horizontal
+// scrolling the viewport has done so the names stay over their columns.
+func (m *model) headLine() string {
+	head := m.head
+	if x := m.vp.XOffset(); x > 0 {
+		head = ansi.TruncateLeft(head, x, "")
+	}
+	return lipgloss.NewStyle().MaxWidth(m.contentWidth()).Render(head)
+}
+
+// sidebarRender draws the menu in full and reports which line the cursor
+// landed on, which is what the scroll window follows.
+func (m *model) sidebarRender() (lines []string, cursor int) {
+	cursor = -1
 	for i, e := range m.entries {
 		switch {
 		case e.view == nil:
 			if i > 0 {
-				out = append(out, "")
+				lines = append(lines, "")
 			}
-			out = append(out, groupStyle.Render(e.label))
+			lines = append(lines, groupStyle.Render(e.label))
+			continue
 		case i == m.cursor && m.focus == paneList:
-			out = append(out, cursorStyle.Render("▸ "+e.label))
+			lines = append(lines, cursorStyle.Render("▸ "+e.label))
 		case i == m.cursor:
-			out = append(out, dividerStyle.Render("▸ "+e.label))
+			lines = append(lines, dividerStyle.Render("▸ "+e.label))
 		default:
-			out = append(out, "  "+e.label)
+			lines = append(lines, "  "+e.label)
+		}
+		if i == m.cursor {
+			cursor = len(lines) - 1
 		}
 	}
-	return out
+	return lines, cursor
+}
+
+// sidebarLines is the slice of the menu that fits the box.
+func (m *model) sidebarLines() []string {
+	lines, _ := m.sidebarRender()
+	h := max(m.bodyBoxHeight()-2, 1)
+	if len(lines) <= h {
+		return lines
+	}
+	top := min(max(m.sideTop, 0), len(lines)-h)
+	return lines[top : top+h]
 }
 
 func (m *model) pane() string {
@@ -882,6 +1053,9 @@ func (m *model) help() string {
 			helpKey{"r reload", 1},
 			helpKey{"q quit", 4},
 		)
+		if m.lines > m.vp.Height() {
+			keys = append(keys, helpKey{"⇞⇟ page", 2})
+		}
 		if m.scrollable() {
 			keys = append(keys, helpKey{"<> scroll", 1})
 		}
