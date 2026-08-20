@@ -161,6 +161,7 @@ go test ./...
 go run . -h hats/albedaran               # the albedaran cluster
 go run . -h hats/demo                    # invented data, no cluster needed
 go run . check -h hats/demo              # validate a hat
+go run . view demo.services -h hats/demo # print one view, no TUI
 CGO_ENABLED=0 go build -o rincewind .    # static, how it ships
 make                                     # lint (golangci-lint), test, build
 make release                             # the release matrix, locally (goreleaser)
