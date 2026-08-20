@@ -18,6 +18,12 @@ type Def struct {
 	Shell   []string // command the script is handed to; defaults to sh -c
 	Script  string
 	Refresh time.Duration
+	// Text takes the script's stdout as lines rather than as JSON, which is
+	// what a log is. Rows, Key, Columns and Sort are then all empty.
+	Text bool
+	// Follow consumes that output as it is written instead of when the
+	// script exits. Only a text view may.
+	Follow  bool
 	Rows    string // jq: one stdout JSON value → row objects
 	Key     string // jq: row → identity; empty means no stable identity
 	Params  []Param
@@ -91,6 +97,15 @@ func Compile(d Def) (View, error) {
 		return View{}, fmt.Errorf("view %q: source.script is required", d.ID)
 	}
 
+	// A text view has no expressions at all: its output is the answer.
+	if d.Text {
+		v, err := newView(d, cv.runText)
+		if err == nil && d.Follow {
+			v.Stream, v.Run = cv.runStream, nil
+		}
+		return v, err
+	}
+
 	var err error
 	if cv.rows, err = compileExpr(d.ID, "rows", d.Rows); err != nil {
 		return View{}, err
@@ -131,6 +146,12 @@ func Compile(d Def) (View, error) {
 		cv.sort = append(cv.sort, sortKey{col: idx, desc: s.Desc, rank: s.Rank})
 	}
 
+	return newView(d, cv.run)
+}
+
+// newView wraps a run function in everything a view carries besides it: the
+// names derived from the id, the parameters, and the compiled actions.
+func newView(d Def, run func(context.Context, Args) (Result, error)) (View, error) {
 	title := d.Title
 	if title == "" {
 		title = d.ID
@@ -152,7 +173,7 @@ func Compile(d Def) (View, error) {
 		Refresh: d.Refresh,
 		Params:  d.Params,
 		Actions: actions,
-		Run:     cv.run,
+		Run:     run,
 	}, nil
 }
 

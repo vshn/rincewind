@@ -21,8 +21,8 @@ func row(emphs []engine.Emphasis, cells ...string) engine.Row {
 	return r
 }
 
-func sample() engine.Table {
-	return engine.Table{
+func sample() engine.Result {
+	return engine.Result{
 		Cols: []string{"NAME", "SYNC", "MESSAGE"},
 		Rows: []engine.Row{
 			row([]engine.Emphasis{engine.Plain, engine.Bad}, "cluster-tools", "OutOfSync", strings.Repeat("x", 80)),

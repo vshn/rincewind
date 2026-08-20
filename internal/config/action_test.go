@@ -153,6 +153,21 @@ func TestBrokenActionsFailWithContext(t *testing.T) {
 			want: []string{"demo.pools", "no name"},
 		},
 		{
+			name: "text view with rows",
+			yaml: strings.Replace(valid, "    rows: .items[]", "    class: text\n    rows: .items[]", 1),
+			want: []string{"demo.list", "rows is not read"},
+		},
+		{
+			name: "text view with columns",
+			yaml: strings.Replace(valid, "    rows: .items[]\n    key: .name\n", "    class: text\n", 1),
+			want: []string{"demo.list", "columns are not read"},
+		},
+		{
+			name: "unknown class",
+			yaml: strings.Replace(valid, "    rows: .items[]", "    class: chart\n    rows: .items[]", 1),
+			want: []string{"demo.list", "chart", "table or text"},
+		},
+		{
 			name: "unknown scope",
 			yaml: strings.Replace(withActions, "      - key: p", "      - scope: sideways\n        key: p", 1),
 			want: []string{"demo.pools", "pause", "sideways", "not rows or none"},
@@ -186,6 +201,24 @@ func TestBrokenActionsFailWithContext(t *testing.T) {
 			name: "action without a key",
 			yaml: strings.Replace(withActions, "      - key: p", "      - short: nothing binds this", 1),
 			want: []string{"demo.pools", "pause", "no key"},
+		},
+		{
+			name: "follow on a table",
+			yaml: strings.Replace(valid, "    rows: .items[]", "    follow: true\n    rows: .items[]", 1),
+			want: []string{"demo.list", "follow needs class: text"},
+		},
+		{
+			name: "follow with refresh",
+			yaml: `
+views:
+  - id: demo.list
+    class: text
+    follow: true
+    refresh: 30s
+    source:
+      script: echo hello
+`,
+			want: []string{"demo.list", "follow and refresh exclude each other"},
 		},
 	}
 

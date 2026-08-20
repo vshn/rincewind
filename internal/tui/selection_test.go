@@ -99,7 +99,7 @@ func TestSelectionIsPrunedWhenRowsVanish(t *testing.T) {
 	m.Update(key("space")) // worker-01
 
 	m.Update(key("r"))
-	shrunk := engine.Table{Cols: nodesTable().Cols, Rows: nodesTable().Rows[1:]}
+	shrunk := engine.Result{Cols: nodesTable().Cols, Rows: nodesTable().Rows[1:]}
 	m.Update(resultMsg{seq: m.seq, res: shrunk})
 
 	if len(m.cur().selection) != 0 {

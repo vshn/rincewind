@@ -52,6 +52,20 @@ views:
         args:
           service: .name
 
+      - key: l
+        name: log
+        short: Show this service's log
+        open: demo.log
+        args:
+          service: .name
+
+      - key: f
+        name: follow
+        short: Follow this service's log as it is written
+        open: demo.tail
+        args:
+          service: .name
+
       # Works on the selection, once per row, and asks first.
       - key: t
         name: restart
@@ -125,3 +139,49 @@ views:
         confirm: '"Restart the service \($args.service)"'
         script: echo "restarted $service"
         reload: true
+
+  # A text view: the script's output is the answer, verbatim. No rows, no
+  # columns, no jq — and no collapsing of whitespace, which is why a log
+  # cannot be a one-column table.
+  - id: demo.log
+    title: One service's log
+    class: text
+    params:
+      - name: service
+        short: service name
+        required: true
+    source:
+      script: |
+        cat <<LOG
+        2026-08-20T07:30:01Z INFO  starting $service
+        2026-08-20T07:30:02Z INFO  connected to the database
+        2026-08-20T07:31:17Z WARN  slow query: 2.4s
+            SELECT * FROM everything
+        2026-08-20T07:31:18Z ERROR liveness probe failed
+        LOG
+
+  # A followed text view: the same shape as demo.log, except that the lines
+  # appear as the script writes them instead of when it exits. Following is
+  # only for text — a table cannot be half-built — and rules out `refresh`,
+  # because a stream that is already live has nothing to poll for.
+  #
+  # Leaving the tab stops the script, and returning starts it again. That is
+  # why a real followed view passes something like `--tail`: what happened
+  # while one was away is gone, so the source has to bring some of it back.
+  - id: demo.tail
+    title: One service's log, followed
+    class: text
+    follow: true
+    params:
+      - name: service
+        short: service name
+        required: true
+    source:
+      script: |
+        echo "2026-08-20T07:30:01Z INFO  starting $service"
+        n=0
+        while [ "$n" -lt 60 ]; do
+          n=$((n + 1))
+          echo "2026-08-20T07:31:$(printf %02d "$n")Z INFO  $service handled request $n"
+          sleep 1
+        done

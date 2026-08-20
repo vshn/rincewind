@@ -31,6 +31,7 @@ type view struct {
 	Title   string   `yaml:"title"`
 	Class   string   `yaml:"class"`
 	Refresh string   `yaml:"refresh"`
+	Follow  bool     `yaml:"follow"`
 	Params  []param  `yaml:"params"`
 	Source  source   `yaml:"source"`
 	Rows    string   `yaml:"rows"`
@@ -221,15 +222,41 @@ func toDef(v view) (engine.Def, error) {
 		return fail("id must not start or end with a dot")
 	}
 
+	// A text view shapes nothing, so the fields that do the shaping are not
+	// merely optional there — they are refused, because a `rows:` nothing
+	// reads is a misunderstanding worth naming rather than ignoring.
 	switch v.Class {
 	case "", "table":
+	case "text":
+		switch {
+		case v.Rows != "":
+			return fail("class text takes the output as lines, so rows is not read")
+		case len(v.Columns) > 0:
+			return fail("class text takes the output as lines, so columns are not read")
+		case len(v.Sort) > 0:
+			return fail("class text keeps the order the script printed, so sort is not read")
+		case v.Key != "":
+			return fail("class text has no rows, so key is not read")
+		}
 	default:
-		return fail("class %q is not supported; only table exists", v.Class)
+		return fail("class %q is not supported; use table or text", v.Class)
+	}
+
+	// Following is consuming the output as it is written, which only makes
+	// sense where the output is lines. A table would have to decide what a
+	// second document means for the rows already on screen.
+	switch {
+	case v.Follow && v.Class != "text":
+		return fail("follow needs class: text; a table has no way to grow a row at a time")
+	case v.Follow && v.Refresh != "":
+		return fail("follow and refresh exclude each other: a stream is already current")
 	}
 
 	d := engine.Def{
 		ID:     v.ID,
 		Title:  v.Title,
+		Text:   v.Class == "text",
+		Follow: v.Follow,
 		Shell:  v.Source.Shell,
 		Script: v.Source.Script,
 		Rows:   v.Rows,
@@ -304,6 +331,13 @@ func toDef(v view) (engine.Def, error) {
 	for _, a := range v.Actions {
 		if a.Name == "" {
 			return fail("an action has no name")
+		}
+
+		// A text view has no rows, so nothing can act on one: no cursor row
+		// to navigate from, no selection to work on. What is left is an
+		// action that acts on nothing.
+		if d.Text && (a.Open != "" || a.Scope != engine.ScopeNone) {
+			return fail("action %s: a text view has no rows, so its actions need scope: none", a.Name)
 		}
 		if actNames[a.Name] {
 			return fail("action %s: declared twice", a.Name)

@@ -14,12 +14,12 @@ and actions — both kinds — are built.
 Drill-down is an action that navigates.
 A working action gets a tab that collects its parameters,
 shows the commands, asks, and holds the output.
-The previous generation's 16 views are ported except the two log views.
+All 16 of the previous generation's views are ported,
+the two log views as followed text views.
 TUI only.
 
-Not built yet: the two log views and the cluster-name probe,
-both deliberately deferred;
-batched (`once:`) actions; CLI output mode; stream views (following logs);
+Not built yet: the cluster-name probe, deliberately deferred;
+batched (`once:`) actions; CLI output mode;
 `loki` and `pods`; a managed port-forward for `argo ui`.
 
 ## Docs
@@ -32,6 +32,10 @@ pipeline, stdout contract, config schema, error philosophy, decisions table.
 A **view** is one entry in a hat's YAML:
 source script, `rows` and column jq expressions,
 sort, emphasis, parameters, actions.
+`class: text` takes the output as lines instead —
+a log, verbatim, with no rows and so no selection.
+`follow: true` reads those lines as the script writes them;
+text only, and it excludes `refresh`.
 
 An **action** does something with the rows a view is showing.
 One mechanism, two kinds:
@@ -65,6 +69,15 @@ Both kinds of action open a tab; `esc` closes it.
   and never take down the view.
   Script failures surface the script's stderr.
 - **Sort and emphasis work on raw jq values**, before formatting.
+- **A text view's lines are never reshaped.**
+  No `oneLine`, no column padding, no truncation:
+  the indentation is what a log is read by.
+- **A followed view has `Stream` and no `Run`**, and the reverse for a snapshot.
+  One field set, never both, so nothing has to guess which shape it holds.
+- **Only one script follows per tab, and none behind a background tab.**
+  Leaving pauses it, returning starts it again;
+  a followed view therefore passes something like `--tail`,
+  because what happened in the meantime is gone.
 - **Selection is keyed by `key`**, pruned against each new result.
 - **A mutation acts on the selection and refuses without one.**
   The filter is no longer the selector; `a` selects what it left.

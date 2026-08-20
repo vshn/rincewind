@@ -1,6 +1,6 @@
 // Package engine turns a view definition into a runnable pipeline:
 // script → JSON value stream → rows expression → column projection → sort →
-// Table. It knows nothing about kubectl or any other producer; a source is
+// Result. It knows nothing about kubectl or any other producer; a source is
 // whatever prints JSON to stdout.
 package engine
 
@@ -54,13 +54,22 @@ type Row struct {
 	Key   string
 }
 
-// Table is what a view produces. Notes carry per-cell evaluation problems:
-// one broken expression must not take down the other 199 rows.
-type Table struct {
+// Result is what a view produces: rows shaped into columns, or plain lines
+// for a text view. Notes carry per-cell evaluation problems: one broken
+// expression must not take down the other 199 rows.
+type Result struct {
 	Cols  []string
 	Rows  []Row
 	Notes []string
+
+	// Lines is a text view's output, verbatim: no columns, no jq, and no
+	// collapsing of whitespace, because in a log the indentation is part of
+	// what is being read. A result carries rows or lines, never both.
+	Lines []string
 }
+
+// Text reports which shape this is.
+func (r Result) Text() bool { return r.Lines != nil }
 
 // Args are the parameters a view instance was opened with. They reach the
 // view's script as environment variables, never as text templated into it:
@@ -186,8 +195,16 @@ type View struct {
 	Refresh time.Duration
 	Params  []Param
 	Actions []Action
-	Run     func(ctx context.Context, args Args) (Table, error)
+	Run     func(ctx context.Context, args Args) (Result, error)
+
+	// Stream is set instead of Run on a followed view: its output arrives as
+	// it is written rather than when the script exits. Cancelling the context
+	// kills the script, which is how one stops following.
+	Stream func(ctx context.Context, args Args) (<-chan Chunk, error)
 }
+
+// Follows reports whether the view streams rather than running once.
+func (v View) Follows() bool { return v.Stream != nil }
 
 // Bind resolves collected values against the declared parameters: the value
 // if given, else the default, else an error when the parameter is required.

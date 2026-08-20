@@ -74,7 +74,7 @@ type entry struct {
 // another tab.
 type resultMsg struct {
 	seq int
-	res engine.Table
+	res engine.Result
 	err error
 }
 
@@ -84,6 +84,15 @@ type jobMsg struct {
 	seq  int
 	out  [][]string
 	errs []error
+}
+
+// chunkMsg carries lines a followed view produced since the last one. The
+// seq names the tab, exactly as a finished run does.
+type chunkMsg struct {
+	seq   int
+	lines []string
+	end   bool
+	err   error
 }
 
 // refreshMsg re-runs a view with a refresh interval. It carries the seq of
@@ -110,7 +119,7 @@ type tab struct {
 	view *engine.View
 	args engine.Args
 
-	res *engine.Table
+	res *engine.Result
 	err error
 
 	// row is the data row the output-pane cursor is on.
@@ -134,6 +143,22 @@ type tab struct {
 	// in the background can reload on the way back instead of showing stale
 	// rows.
 	fetched time.Time
+
+	// stream is the channel a followed view's lines arrive on. It is set
+	// while following and cleared when the script ends or the tab is left:
+	// a stream pauses in the background, the way a refresh does, so there is
+	// never more than one script following.
+	stream <-chan engine.Chunk
+	// ended says the script stopped by itself rather than being cancelled —
+	// the pod went away, which is a finding worth showing. endErr is kept
+	// apart from err on purpose: err replaces the output, and the lines read
+	// before the stream broke are exactly what one wants to look at.
+	// stopped says following was ended by hand rather than by the script:
+	// being told "the stream ended" after pressing esc explains nothing one
+	// did not just do.
+	ended   bool
+	stopped bool
+	endErr  error
 
 	// job is set on a tab that runs an action rather than showing a view.
 	// A tab holds one or the other, never both.
@@ -360,14 +385,37 @@ func (m *model) selected() *engine.View {
 }
 
 // visible is the result after filtering: what the output pane renders.
-func (m *model) visible() engine.Table {
+func (m *model) visible() engine.Result {
 	if m.cur().res == nil {
-		return engine.Table{}
+		return engine.Result{}
 	}
 	return filtered(*m.cur().res, m.filter.Value())
 }
 
 func (m *model) rowCount() int { return len(m.visible().Rows) }
+
+// shownCount is how much the output pane is showing, of whichever kind: the
+// filter's count and "nothing to show" mean the same thing either way.
+func (m *model) shownCount() int {
+	vis := m.visible()
+	if vis.Text() {
+		return len(vis.Lines)
+	}
+	return len(vis.Rows)
+}
+
+// total is how much there was before the filter.
+func (m *model) total() int {
+	t := m.cur()
+	switch {
+	case t.res == nil:
+		return 0
+	case t.res.Text():
+		return len(t.res.Lines)
+	default:
+		return len(t.res.Rows)
+	}
+}
 
 func (m *model) Init() tea.Cmd { return nil }
 
@@ -383,9 +431,17 @@ func (m *model) stopAll() {
 // spinner tick chain lives as long as one does.
 func (m *model) anyRunning() bool {
 	for _, t := range m.tabs {
-		if t.running {
-			return true
+		if !t.running {
+			continue
 		}
+		// A followed view spins only until its first lines arrive. After
+		// that nothing is turning on screen, and a tick chain outliving its
+		// spinner would repaint ten times a second for as long as the log
+		// runs.
+		if t.stream != nil && t.res != nil && len(t.res.Lines) > 0 {
+			continue
+		}
+		return true
 	}
 	return false
 }
@@ -475,6 +531,35 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showResult()
 		}
 		return m, cmd
+
+	case chunkMsg:
+		t := m.tabBySeq(msg.seq)
+		if t == nil {
+			return m, nil
+		}
+
+		// Stay pinned to the end only if that is where the reader is; once
+		// they have scrolled up, new lines must not yank the view away.
+		follow := t == m.cur() && m.atBottom()
+		t.appendLines(msg.lines)
+
+		if msg.end {
+			// stop rather than dropping the cancel func: the script is gone,
+			// but its context still has to be released.
+			t.stop()
+			t.stream, t.running = nil, false
+			t.ended, t.endErr = true, msg.err
+		}
+		if t == m.cur() {
+			m.showResult()
+			if follow {
+				m.vp.GotoBottom()
+			}
+		}
+		if msg.end {
+			return m, nil
+		}
+		return m, m.readChunk(msg.seq, t.stream)
 
 	case refreshMsg:
 		// Only the tab on screen reloads on a tick: several tabs refreshing
@@ -591,6 +676,9 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "esc":
 		switch {
+		case m.cur().stream != nil:
+			m.stopFollow(m.cur())
+			m.showResult()
 		case m.cur().running:
 			m.cur().stop()
 		case m.filter.Value() != "":
@@ -774,10 +862,10 @@ func (m *model) entryAt(y int) int {
 }
 
 // toggleFocus moves the keyboard between the list and the output. Only worth
-// doing when the output has rows to land on.
+// doing when the output has something to land on — rows, or a log's lines.
 func (m *model) toggleFocus() {
 	if m.focus == paneList {
-		if m.rowCount() == 0 {
+		if m.shownCount() == 0 {
 			return
 		}
 		m.focus, m.cur().row = paneOutput, 0
@@ -792,6 +880,17 @@ func (m *model) move(step int) {
 	if m.focus == paneList {
 		m.cursor = m.next(m.cursor, step)
 		m.syncSidebar()
+		return
+	}
+
+	// A text view has no row to move: the keys scroll it, which is what one
+	// wants from a log anyway.
+	if m.hasText() {
+		if step < 0 {
+			m.vp.ScrollUp(-step)
+		} else {
+			m.vp.ScrollDown(step)
+		}
 		return
 	}
 
@@ -828,6 +927,15 @@ func (m *model) jump(dir int) {
 		return
 	}
 
+	if m.hasText() {
+		if dir < 0 {
+			m.vp.GotoTop()
+		} else {
+			m.vp.GotoBottom()
+		}
+		return
+	}
+
 	if n := m.rowCount(); n > 0 {
 		if dir < 0 {
 			m.cur().row = 0
@@ -838,10 +946,10 @@ func (m *model) jump(dir int) {
 	}
 }
 
-// follow scrolls the viewport just enough to keep the row cursor in sight,
+// followCursor scrolls the viewport just enough to keep the row cursor in sight,
 // stopping at the edge rather than recentring: a table that jumps under the
 // eye is harder to read than one that creeps.
-func (m *model) follow(cursor int) {
+func (m *model) followCursor(cursor int) {
 	if cursor < 0 {
 		return
 	}
@@ -954,6 +1062,10 @@ func (m *model) clampRow() {
 // menu is starting over, not drilling: every tab opened by an action goes.
 func (m *model) open() tea.Cmd {
 	m.closeFrom(1)
+	// The first tab is replaced rather than dropped, so its run has to be
+	// cancelled by hand — a followed one would otherwise keep a script alive
+	// with nothing left on screen to show for it.
+	m.tabs[0].stop()
 	m.tabs[0], m.act = newTab(m.selected(), nil), 0
 	m.filter.SetValue("")
 	m.focus = paneList
@@ -981,6 +1093,11 @@ func (m *model) reload() tea.Cmd {
 func (m *model) launch(t *tab) tea.Cmd {
 	if t.view == nil {
 		return nil
+	}
+	// A followed view is never finished, so it takes the other path — and
+	// notably no deadline.
+	if t.view.Follows() {
+		return m.follow(t)
 	}
 
 	t.stop()
@@ -1043,6 +1160,7 @@ func (m *model) activate(i int) tea.Cmd {
 		return nil
 	}
 	m.park()
+	m.pauseStream(m.cur())
 
 	m.act = i
 	t := m.cur()
@@ -1077,7 +1195,18 @@ func (m *model) closeTab() tea.Cmd {
 // resume re-arms a returning tab's refresh, reloading at once when the data
 // aged past the interval while the tab sat in the background.
 func (m *model) resume(t *tab) tea.Cmd {
-	if t.view == nil || t.view.Refresh <= 0 || t.running {
+	if t.view == nil || t.running {
+		return nil
+	}
+	// A followed view was paused on the way out; start it again unless it
+	// had already ended by itself, which is a finding to leave on screen.
+	if t.view.Follows() {
+		if t.ended {
+			return nil
+		}
+		return m.follow(t)
+	}
+	if t.view.Refresh <= 0 {
 		return nil
 	}
 	if !t.fetched.IsZero() && time.Since(t.fetched) >= t.view.Refresh {
@@ -1138,10 +1267,21 @@ func (m *model) vpHeight() int {
 }
 
 // hasTable reports whether the content box is showing rows, as opposed to a
-// job, a spinner, an error or a note that there is nothing to see.
+// job, a text view, a spinner, an error or a note that there is nothing to
+// see. Only rows get a sticky header and a row cursor.
 func (m *model) hasTable() bool {
 	t := m.cur()
-	return t.job == nil && t.err == nil && !t.running && t.res != nil && m.rowCount() > 0
+	return t.job == nil && t.err == nil && !t.running &&
+		t.res != nil && !t.res.Text() && m.rowCount() > 0
+}
+
+// hasText reports whether the content box is showing a text view's lines.
+func (m *model) hasText() bool {
+	t := m.cur()
+	// A followed view has lines while it is still running, which is the
+	// whole point; only an error hides them.
+	return t.job == nil && t.err == nil && t.res != nil && t.res.Text() &&
+		(!t.running || t.stream != nil)
 }
 
 // statusLines is the room the status bar takes, so the viewport shrinks
@@ -1159,13 +1299,24 @@ func (m *model) resize() {
 }
 
 // filtered narrows a table to the rows that match.
-func filtered(t engine.Table, needle string) engine.Table {
+func filtered(t engine.Result, needle string) engine.Result {
 	needle = strings.ToLower(strings.TrimSpace(needle))
 	if needle == "" {
 		return t
 	}
 
-	out := engine.Table{Cols: t.Cols, Notes: t.Notes}
+	// Filtering a log is grep, and is most of what one does with one.
+	if t.Text() {
+		out := engine.Result{Lines: []string{}, Notes: t.Notes}
+		for _, line := range t.Lines {
+			if strings.Contains(strings.ToLower(line), needle) {
+				out.Lines = append(out.Lines, line)
+			}
+		}
+		return out
+	}
+
+	out := engine.Result{Cols: t.Cols, Notes: t.Notes}
 	for _, row := range t.Rows {
 		parts := make([]string, len(row.Cells))
 		for i, c := range row.Cells {
@@ -1196,6 +1347,21 @@ func (m *model) showResult() {
 
 	vis := m.visible()
 
+	// A text view's lines go in as they came out of the script: no header,
+	// no styling, no truncation. Whitespace is part of what is being read.
+	if vis.Text() {
+		lines := vis.Lines
+		// That a followed script stopped is itself a finding — the pod went
+		// away — so it is said under the last line rather than swallowed.
+		if t := m.cur(); t.ended {
+			lines = append(append([]string{}, lines...), m.endMarker(t))
+		}
+		m.head = ""
+		m.vp.SetContentLines(lines)
+		m.lines = len(lines)
+		return
+	}
+
 	cursor := -1
 	if m.focus == paneOutput && len(vis.Rows) > 0 {
 		m.clampRow()
@@ -1215,13 +1381,24 @@ func (m *model) showResult() {
 
 	m.vp.SetContentLines(lines)
 	m.lines = len(lines)
-	m.follow(cursor)
+	m.followCursor(cursor)
+}
+
+// endMarker says why a followed view stopped producing.
+func (m *model) endMarker(t *tab) string {
+	switch {
+	case t.endErr != nil:
+		return errStyle.Render("— stream failed: " + t.endErr.Error() + " —  (r to start again)")
+	case t.stopped:
+		return dividerStyle.Render("— stopped —  (r to start again)")
+	}
+	return dividerStyle.Render("— stream ended —  (r to start again)")
 }
 
 // tableStyle paints emphasis, the row cursor and the selection. Emphasis
 // colours are dropped on highlighted rows: a highlight has to survive the
 // whole line, and the reset at the end of a coloured cell would cut it short.
-func (m *model) tableStyle(vis engine.Table, cursor int) render.Style {
+func (m *model) tableStyle(vis engine.Result, cursor int) render.Style {
 	return render.Style{
 		Header: func(s string) string { return headerStyle.Render(s) },
 		Cell: func(row int, e engine.Emphasis, s string) string {
@@ -1392,6 +1569,9 @@ func (m *model) contentLines() []string {
 	case m.hasTable():
 		lines = append(lines, m.headLine())
 		lines = append(lines, strings.Split(m.vp.View(), "\n")...)
+	case m.hasText() && m.shownCount() > 0:
+		// No sticky header: there are no column names to keep.
+		lines = strings.Split(m.vp.View(), "\n")
 	default:
 		lines = strings.Split(m.pane(), "\n")
 	}
@@ -1468,15 +1648,19 @@ func (m *model) pane() string {
 	case m.cur().err != nil:
 		return errStyle.Render("error: " + m.cur().err.Error())
 
-	case m.cur().running:
+	case m.cur().running && m.cur().stream != nil && m.shownCount() == 0:
+		return fmt.Sprintf("%s following…", m.spin.View())
+
+	case m.cur().running && m.cur().stream == nil:
 		return fmt.Sprintf("%s running…", m.spin.View())
 
 	case m.cur().res == nil:
 		return helpStyle.Render("press ⏎ to run")
 	}
 
-	// A table of nothing but headers reads like a failure. Say which it is.
-	if m.rowCount() == 0 {
+	// A table of nothing but headers, or a log with no lines, reads like a
+	// failure. Say which it is.
+	if m.shownCount() == 0 {
 		if m.filter.Value() != "" {
 			return helpStyle.Render("nothing matches " + m.filter.Value())
 		}
@@ -1497,7 +1681,7 @@ func (m *model) statusLine() string {
 		parts = append(parts, dividerStyle.Render("/"+m.filter.Value()))
 	}
 	if m.cur().res != nil && (m.filtering || m.filter.Value() != "") {
-		parts = append(parts, dividerStyle.Render(fmt.Sprintf("%d of %d", m.rowCount(), len(m.cur().res.Rows))))
+		parts = append(parts, dividerStyle.Render(fmt.Sprintf("%d of %d", m.shownCount(), m.total())))
 	}
 	if n := len(m.cur().selection); n > 0 {
 		parts = append(parts, warnStyle.Render(fmt.Sprintf("%d selected", n)))
@@ -1542,7 +1726,8 @@ func (m *model) help() string {
 		keys = []helpKey{{"y confirm", 4}, {"any other key cancels", 1}}
 	case m.filtering:
 		keys = []helpKey{{"⏎ keep filter", 1}, {"esc clear", 2}}
-	case m.cur().running:
+	// A followed view is read while it runs, so it keeps the full legend.
+	case m.cur().running && m.cur().stream == nil:
 		keys = []helpKey{{"esc cancel", 2}, {"q quit", 1}}
 	default:
 		if m.focus == paneList {
@@ -1554,11 +1739,21 @@ func (m *model) help() string {
 			helpKey{"↑↓ move", 1},
 			helpKey{"⇥ focus", 2},
 			helpKey{"/ filter", 2},
-			helpKey{"r reload", 1},
 			helpKey{"q quit", 4},
 		)
+		// While a stream runs, esc stops it rather than going back, and
+		// reloading it is what stopping and starting again would be. The
+		// legend must not promise the other meanings.
+		if m.cur().stream != nil {
+			keys = append(keys, helpKey{"esc stop", 3})
+		} else {
+			keys = append(keys, helpKey{"r reload", 1})
+			if len(m.tabs) > 1 {
+				keys = append(keys, helpKey{"esc back", 4})
+			}
+		}
 		if len(m.tabs) > 1 {
-			keys = append(keys, helpKey{"][ tabs", 2}, helpKey{"esc back", 4})
+			keys = append(keys, helpKey{"][ tabs", 2})
 		}
 		if m.lines > m.vp.Height() {
 			keys = append(keys, helpKey{"⇞⇟ page", 2})
