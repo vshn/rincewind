@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/vshn/aldediggi/cmd"
+	"github.com/vshn/rincewind/cmd"
 )
 
 func main() {

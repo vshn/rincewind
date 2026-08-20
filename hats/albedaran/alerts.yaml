@@ -103,7 +103,7 @@ views:
         script: |
           kubectl -n openshift-monitoring --as system:admin exec sts/alertmanager-main -- \
             amtool --alertmanager.url=http://localhost:9093 silence add \
-              --author "${USER:-aldediggi}" --comment "$comment" --end "$end_at" "$matcher"
+              --author "${USER:-rincewind}" --comment "$comment" --end "$end_at" "$matcher"
         reload: true
 
   - id: alerts.silences
@@ -200,7 +200,7 @@ views:
           done
           kubectl -n openshift-monitoring --as system:admin exec sts/alertmanager-main -- \
             amtool --alertmanager.url=http://localhost:9093 silence add \
-              --author "${USER:-aldediggi}" --comment "$comment" --end "$end_at" "$@"
+              --author "${USER:-rincewind}" --comment "$comment" --end "$end_at" "$@"
         reload: true
 
   - id: alerts.detail
@@ -257,6 +257,6 @@ views:
             | jq -r --arg f "$fingerprint" '[.[] | select(.fingerprint == $f)][0].labels.alertname')
           kubectl -n openshift-monitoring --as system:admin exec sts/alertmanager-main -- \
             amtool --alertmanager.url=http://localhost:9093 silence add \
-              --author "${USER:-aldediggi}" --comment "$comment" --end "$end_at" \
+              --author "${USER:-rincewind}" --comment "$comment" --end "$end_at" \
               "alertname=\"$alert\""
         reload: true

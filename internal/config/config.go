@@ -16,7 +16,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/vshn/aldediggi/internal/engine"
+	"github.com/vshn/rincewind/internal/engine"
 )
 
 // file mirrors the YAML schema. Unknown fields are rejected by the decoder,

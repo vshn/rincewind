@@ -8,7 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/vshn/aldediggi/internal/engine"
+	"github.com/vshn/rincewind/internal/engine"
 )
 
 // drilling builds a model showing the pools view with the output focused,

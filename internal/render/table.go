@@ -5,7 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/vshn/aldediggi/internal/engine"
+	"github.com/vshn/rincewind/internal/engine"
 )
 
 // gutter is the space between columns.

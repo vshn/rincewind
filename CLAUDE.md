@@ -1,4 +1,4 @@
-# aldediggi
+# rincewind
 
 Config-driven cluster diagnostic TUI.
 Views are defined in a YAML file: each runs a script,
@@ -122,7 +122,7 @@ go build ./...
 go test ./...
 go run . -h examples                     # TUI against the example hat
 go run . check -h examples               # validate a hat
-CGO_ENABLED=0 go build -o aldediggi .    # static, how it ships
+CGO_ENABLED=0 go build -o rincewind .    # static, how it ships
 make                                     # lint (golangci-lint), test, build
 make release                             # macOS + Linux binaries in dist/
 ```

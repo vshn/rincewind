@@ -1,8 +1,8 @@
 # Static binaries, as the tool ships.
-BINARY  := aldediggi
+BINARY  := rincewind
 DIST    := dist
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS := -ldflags "-X github.com/vshn/aldediggi/cmd.version=$(VERSION)"
+LDFLAGS := -ldflags "-X github.com/vshn/rincewind/cmd.version=$(VERSION)"
 export CGO_ENABLED = 0
 
 .PHONY: all lint test build build-macos build-linux release clean

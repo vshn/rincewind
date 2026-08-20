@@ -1,4 +1,4 @@
-# aldediggi
+# rincewind
 
 Config-driven cluster diagnostic TUI.
 Views are defined in a YAML file: each view runs a script, reads a stream of
@@ -53,9 +53,9 @@ call that produced it, and `esc` takes you back to the list untouched.
 ## Use
 
 ```
-aldediggi                  # TUI; views from the hat at ~/.config/aldediggi/
-aldediggi -h examples      # try it without a cluster (demo view included)
-aldediggi check            # validate the hat without starting the TUI
+rincewind                      # TUI; views from the hat at ~/.config/rincewind/
+rincewind --hat ./hats/demo    # try it without a cluster (demo view included)
+rincewind check                # validate the hat without starting the TUI
 ```
 
 In the TUI: `⏎` runs the view under the cursor, `⇥` focuses the output,

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/vshn/aldediggi/internal/engine"
+	"github.com/vshn/rincewind/internal/engine"
 )
 
 // row builds a fixture row whose key is its first cell, the way a config

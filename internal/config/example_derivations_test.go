@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vshn/aldediggi/internal/engine"
+	"github.com/vshn/rincewind/internal/engine"
 )
 
 // fakeKubectl puts a kubectl on the PATH that answers `get <resource>` and

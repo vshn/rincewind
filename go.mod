@@ -1,4 +1,4 @@
-module github.com/vshn/aldediggi
+module github.com/vshn/rincewind
 
 go 1.26.5
 

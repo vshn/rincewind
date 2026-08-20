@@ -8,7 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/vshn/aldediggi/internal/engine"
+	"github.com/vshn/rincewind/internal/engine"
 )
 
 func key(s string) tea.KeyPressMsg {
@@ -223,7 +223,7 @@ func TestTitleShowsIDAndTitle(t *testing.T) {
 
 	// Line 0 is the title box's border; the text sits inside it.
 	title := strings.Split(m.View().Content, "\n")[1]
-	for _, want := range []string{"aldediggi", "demo.quick", "One quick row"} {
+	for _, want := range []string{"rincewind", "demo.quick", "One quick row"} {
 		if !strings.Contains(title, want) {
 			t.Errorf("title %q missing %q", visibleOnly(title), want)
 		}

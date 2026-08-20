@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vshn/aldediggi/internal/engine"
+	"github.com/vshn/rincewind/internal/engine"
 )
 
 const poolsFixtureFull = `{"items":[

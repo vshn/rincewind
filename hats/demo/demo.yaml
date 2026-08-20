@@ -1,6 +1,6 @@
 # Cluster-free smoke test, so the TUI can be tried anywhere:
 #
-#   aldediggi -c examples
+#   rincewind -h examples
 #
 # The other files in this directory need kubectl and a cluster.
 

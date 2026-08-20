@@ -219,7 +219,7 @@ Semantics that are easy to get wrong:
 ## The hat
 
 The views are pulled out of a **hat**: the directory named by `--hat`/`-h`,
-else `$ALDEDIGGI_HAT`, else `~/.config/aldediggi/`. Every `*.yaml` in it is
+else `$RINCEWIND_HAT`, else `~/.config/rincewind/`. Every `*.yaml` in it is
 read, in name order, which keeps one file per group — `argo.yaml`,
 `upgrade.yaml`, `nodes.yaml`, `alerts.yaml`. Actions are linked once every
 file has been read, so a view may open one declared in another. Naming a
@@ -239,7 +239,7 @@ answering it:
    keys are checked against column names, ids for uniqueness, enums for
    their values; unknown YAML fields are rejected with a line number. A typo
    dies before any script runs, naming the view and the field.
-   `aldediggi check` runs just this.
+   `rincewind check` runs just this.
 2. **Runtime failures are per cell, not per view.** A column expression that
    errors renders `!err` in that cell and one note below the table; the
    other columns and rows stay usable.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vshn/aldediggi/internal/engine"
+	"github.com/vshn/rincewind/internal/engine"
 )
 
 // nodesFixture is what the fake kubectl serves: a healthy master, a node

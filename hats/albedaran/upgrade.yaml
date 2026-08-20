@@ -172,7 +172,7 @@ views:
         expr: >-
           (.metadata.labels // {}) as $l
           | if $l["argocd.argoproj.io/instance"] then "argocd"
-            elif $l["app.kubernetes.io/managed-by"] == "aldediggi" then "aldediggi"
+            elif $l["app.kubernetes.io/managed-by"] == "rincewind" then "rincewind"
             else "-" end
       - name: REASON
         expr: .spec.reason // ""
@@ -231,7 +231,7 @@ views:
           metadata:
             name: "$name"
             labels:
-              app.kubernetes.io/managed-by: aldediggi
+              app.kubernetes.io/managed-by: rincewind
           spec:
             start: "$start_at"
             end: "$end_at"

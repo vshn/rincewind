@@ -16,8 +16,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/vshn/aldediggi/internal/engine"
-	"github.com/vshn/aldediggi/internal/render"
+	"github.com/vshn/rincewind/internal/engine"
+	"github.com/vshn/rincewind/internal/render"
 )
 
 const (
@@ -1307,7 +1307,7 @@ func (m *model) View() tea.View {
 func (m *model) titleLine() string {
 	sep := sepStyle.Render("  ·  ")
 
-	name := titleStyle.Render("aldediggi")
+	name := titleStyle.Render("rincewind")
 	if j := m.cur().job; j != nil {
 		if j.asking() {
 			return name + sep + titleStyle.Render(j.action.Name) + sep +

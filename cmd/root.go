@@ -10,8 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vshn/aldediggi/internal/config"
-	"github.com/vshn/aldediggi/internal/tui"
+	"github.com/vshn/rincewind/internal/config"
+	"github.com/vshn/rincewind/internal/tui"
 )
 
 // hatFlag names the hat: the directory the views are taken out of.
@@ -22,9 +22,9 @@ var hatFlag string
 var version = "dev"
 
 var rootCmd = &cobra.Command{
-	Use:   "aldediggi",
+	Use:   "rincewind",
 	Short: "Cluster diagnostic TUI driven by a hat full of YAML views",
-	Long: "aldediggi renders the views it pulls out of its hat — a directory of\n" +
+	Long: "rincewind renders the views it pulls out of its hat — a directory of\n" +
 		"YAML files. Each view runs a script, reads a stream of JSON values from\n" +
 		"its stdout and shapes them into a table with jq expressions.",
 	SilenceUsage: true,
@@ -66,14 +66,14 @@ func hat() string {
 	if hatFlag != "" {
 		return hatFlag
 	}
-	if env := os.Getenv("ALDEDIGGI_HAT"); env != "" {
+	if env := os.Getenv("RINCEWIND_HAT"); env != "" {
 		return env
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "."
 	}
-	return filepath.Join(home, ".config", "aldediggi")
+	return filepath.Join(home, ".config", "rincewind")
 }
 
 func init() {
