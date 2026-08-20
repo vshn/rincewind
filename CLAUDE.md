@@ -147,7 +147,7 @@ go run . -h hats/demo                    # invented data, no cluster needed
 go run . check -h hats/demo              # validate a hat
 CGO_ENABLED=0 go build -o rincewind .    # static, how it ships
 make                                     # lint (golangci-lint), test, build
-make release                             # macOS + Linux binaries in dist/
+make release                             # the release matrix, locally (goreleaser)
 ```
 
 ## Testing
@@ -172,6 +172,21 @@ make release                             # macOS + Linux binaries in dist/
   Fixtures are in-memory views in `internal/tui/fixture_test.go`,
   one of which sleeps so tests can verify painting during work in flight.
   Keep new panes covered — layout bugs are caught here, not by eye.
+
+## CI
+
+Three checks on every push and pull request — `build`, `test`, `lint` —
+each calling the matching `make` target,
+except lint, which uses the golangci-lint action for its inline annotations.
+`.golangci.yml` is what both it and `make lint` read,
+so the two cannot check different things.
+
+A release is cut by merging a pull request labelled `Release`:
+that tags, the tag runs goreleaser,
+and `.goreleaser.yml` is the single definition of what ships —
+darwin and linux, amd64 and arm64.
+It carries the same `cmd.version` ldflag the Makefile does;
+without it a released binary answers `rincewind version` with `dev`.
 
 ## Conventions
 

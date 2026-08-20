@@ -1,0 +1,12 @@
+# Read by `make lint` and by the lint workflow alike, so the two cannot check
+# different things. The defaults (errcheck, govet, ineffassign, staticcheck,
+# unused) are kept; gofmt is added because formatting is not negotiable and
+# CI should say so in the diff rather than in a separate step.
+version: "2"
+
+linters:
+  default: standard
+
+formatters:
+  enable:
+    - gofmt

@@ -81,7 +81,7 @@ and `M` again to take it back.
 
 ```
 make              # lint, test, build
-make release      # static macOS and Linux binaries in dist/
+make release      # all four release binaries in dist/, without publishing
 ```
 
 ## Docs
@@ -91,3 +91,8 @@ make release      # static macOS and Linux binaries in dist/
 - [hats/demo/](hats/demo/) — a hat that invents its own data:
   no cluster, no kubectl.
   Read it first when writing a hat of your own
+
+## Licence
+
+Apache 2.0, the same as its sibling [gandalf](https://github.com/appuio/gandalf).
+See [LICENSE](LICENSE).
