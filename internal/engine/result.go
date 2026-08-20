@@ -7,6 +7,8 @@ package engine
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -60,6 +62,103 @@ type Table struct {
 	Notes []string
 }
 
+// Args are the parameters a view instance was opened with. They reach the
+// view's script as environment variables, never as text templated into it:
+// a value spliced into code is an injection hole, an environment variable is
+// not.
+type Args map[string]string
+
+func (a Args) Get(name string) string { return a[name] }
+
+// Param is a value a view needs before it can run. A view with a required
+// parameter cannot be started from the menu — it is reached by an action
+// that supplies one.
+type Param struct {
+	Name     string
+	Short    string
+	Default  string
+	Required bool
+}
+
+// Action is something a view offers to do with the rows it is showing.
+// Exactly one of Open or Run is set: the first navigates to another view,
+// the second does work.
+type Action struct {
+	Key   string
+	Name  string
+	Short string
+
+	// Open is the view a navigating action moves to, resolved at load time
+	// so nothing has to look a view up by id at run time. Args derives its
+	// parameters from the row under the cursor.
+	Open *View
+	Args func(src any, cur Args) (Args, error)
+
+	// Plan turns the selected rows into the invocations the action would
+	// make, one per row, *without* running any of them. Producing them up
+	// front is what lets the tool show exactly what it is about to do —
+	// and lets the question be asked with the command in plain sight.
+	Plan    func(rows []any, cur Args) ([]Step, error)
+	Confirm func(rows []any, cur Args) (string, error)
+	Reload  bool
+
+	// openID and argNames survive compilation so Link can resolve the target
+	// and check the arguments against the parameters it declares.
+	openID   string
+	argNames []string
+}
+
+// Navigates reports which kind of action this is.
+func (a Action) Navigates() bool { return a.Open != nil }
+
+// Step is one invocation an action will make: one row, the environment it
+// gets and the script handed to the shell. Nothing here is interpolated —
+// the script is the text from the config, the values travel beside it.
+type Step struct {
+	Row    string // the row's key, to say which object this is about
+	Env    Args
+	Shell  []string
+	Script string
+	Stdin  []byte
+}
+
+// Command renders the invocation for reading: the values, the shell, then
+// the script as written. It is deliberately not one shell-quoted line —
+// that would be a fiction, since the values never enter the script text.
+func (s Step) Command() []string {
+	out := make([]string, 0, len(s.Env)+4)
+
+	names := make([]string, 0, len(s.Env))
+	for name := range s.Env {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		out = append(out, fmt.Sprintf("  %s=%s", name, s.Env[name]))
+	}
+
+	out = append(out, "  "+strings.Join(s.Shell, " "))
+	for _, line := range strings.Split(strings.TrimRight(s.Script, "\n"), "\n") {
+		out = append(out, "    "+line)
+	}
+	return out
+}
+
+// Run executes one step and returns what it printed.
+func (s Step) Run(ctx context.Context) ([]string, error) {
+	out, err := runScript(ctx, s.Shell, s.Script, s.Env, s.Stdin)
+	if err != nil {
+		return nil, err
+	}
+	var lines []string
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines, nil
+}
+
 // View is a compiled, runnable view. Run owns the whole pipeline; callers
 // impose their own deadline through ctx.
 //
@@ -72,5 +171,19 @@ type View struct {
 	Title   string
 	Group   string
 	Refresh time.Duration
-	Run     func(ctx context.Context) (Table, error)
+	Params  []Param
+	Actions []Action
+	Run     func(ctx context.Context, args Args) (Table, error)
+}
+
+// Listed reports whether the view can be started from the menu. One that
+// needs a parameter cannot: running it with an empty value would show some
+// arbitrary object's data as if it were the answer.
+func (v View) Listed() bool {
+	for _, p := range v.Params {
+		if p.Required {
+			return false
+		}
+	}
+	return true
 }

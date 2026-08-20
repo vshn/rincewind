@@ -75,7 +75,7 @@ func TestRowCursorIsClampedByTheFilter(t *testing.T) {
 	typeFilter(m, "notready") // one row left
 
 	m.Update(key("space"))
-	if !m.selection["worker-02"] {
+	if !m.cur().selection["worker-02"] {
 		t.Fatalf("selected %v, want worker-02: the cursor was not clamped", selectedKeys(m))
 	}
 }

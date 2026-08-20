@@ -58,6 +58,8 @@ var (
 	borderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	focusBorder  = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
 	tabStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	keyStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	promptStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11"))
 )
 
 // entry is one line in the sidebar. A nil view marks a group header, which
@@ -67,12 +69,21 @@ type entry struct {
 	view  *engine.View
 }
 
-// resultMsg carries a finished run. The seq is compared against the model's
-// current one so that a slow run cannot overwrite the output of a newer one.
+// resultMsg carries a finished view run. The seq names the tab it belongs
+// to, so a slow run cannot overwrite the output of a newer one or of
+// another tab.
 type resultMsg struct {
 	seq int
 	res engine.Table
 	err error
+}
+
+// jobMsg carries what an action's steps printed, one entry per step so the
+// output stays beside the invocation that produced it.
+type jobMsg struct {
+	seq  int
+	out  [][]string
+	errs []error
 }
 
 // refreshMsg re-runs a view with a refresh interval. It carries the seq of
@@ -89,6 +100,85 @@ const (
 	paneOutput
 )
 
+// tab is one view on screen in the content box: the view, the parameters it
+// was opened with, and every piece of state that must be exactly where it
+// was left when the user comes back to it. The previous generation of this
+// tool kept a view stack and re-ran the parent on the way back, which lost
+// the filter, the row cursor and the scroll position — that loss is what
+// tabs exist to fix.
+type tab struct {
+	view *engine.View
+	args engine.Args
+
+	res *engine.Table
+	err error
+
+	// row is the data row the output-pane cursor is on.
+	row int
+	// filter is the widget's value, parked while another tab holds it.
+	filter string
+	// selection holds the keys of the selected rows. Keys rather than
+	// indices, so a reload that reorders the table keeps the selection on
+	// the same objects.
+	selection map[string]bool
+	// yOff and xOff park the scroll position of a tab in the background.
+	yOff, xOff int
+
+	// seq stamps the run in flight. Numbers come from one counter that never
+	// reuses them, so a result finds its tab by it and finds none when the
+	// tab has since started a newer run or was closed.
+	seq     int
+	running bool
+	cancel  context.CancelFunc
+	// fetched is when res arrived, so a tab whose refresh interval elapsed
+	// in the background can reload on the way back instead of showing stale
+	// rows.
+	fetched time.Time
+
+	// job is set on a tab that runs an action rather than showing a view.
+	// A tab holds one or the other, never both.
+	job *job
+}
+
+// job is a working action given a tab of its own: what it is about to run,
+// spelled out, and what that had to say. Showing the command before it runs
+// is the point — a confirmation with the invocation in plain sight above it
+// asks a question one can actually answer.
+type job struct {
+	name   string
+	steps  []engine.Step
+	out    [][]string // what each step printed, filled in as they finish
+	errs   []error    // and how it went wrong, per step
+	done   bool
+	reload *tab // the view to run again afterwards, if the action asked
+}
+
+func newTab(v *engine.View, args engine.Args) *tab {
+	return &tab{view: v, args: args, selection: map[string]bool{}}
+}
+
+// label names the tab: the view's short name, or the action a job runs.
+func (t *tab) label() string {
+	switch {
+	case t.job != nil:
+		return t.job.label()
+	case t.view == nil:
+		return "?"
+	case t.view.Name != "":
+		return t.view.Name
+	default:
+		return t.view.ID
+	}
+}
+
+// stop cancels this tab's run in flight, if any.
+func (t *tab) stop() {
+	if t.cancel != nil {
+		t.cancel()
+		t.cancel = nil
+	}
+}
+
 type model struct {
 	entries []entry
 	cursor  int
@@ -96,14 +186,12 @@ type model struct {
 	// version is shown in the footer; the binary stamps it at build time.
 	version string
 
-	focus pane
-	// row is the data row the output-pane cursor is on.
-	row int
+	// tabs is never empty: the content box always shows something, even
+	// before the first run. act indexes the one on screen.
+	tabs []*tab
+	act  int
 
-	// selection holds the keys of the selected rows. Keys rather than
-	// indices, so a reload that reorders the table keeps the selection on
-	// the same objects.
-	selection map[string]bool
+	focus pane
 
 	width, height int
 
@@ -128,18 +216,33 @@ type model struct {
 	// copy node names out of is a real loss — hence the toggle.
 	mouse bool
 
-	seq     int
-	running bool
-	res     *engine.Table
-	err     error
+	// seq counts runs across every tab and never reuses a number, so one
+	// rule covers all three kinds of stale message: a superseded run, a run
+	// whose tab was closed, and a refresh tick for a backgrounded tab. Each
+	// simply finds no tab.
+	seq int
 
-	// cancel stops the run in flight, on escape or on quit.
-	cancel context.CancelFunc
-
-	// filter narrows what is shown.
+	// filter narrows what is shown. One widget; the value belongs to the
+	// active tab and is parked on it when another takes over.
 	filter    textinput.Model
 	filtering bool
+
+	// pending holds an action waiting to be confirmed, together with the tab
+	// showing what it will run: the question was asked about those exact
+	// commands, so it is answered about them and not about whatever the
+	// selection has become by the time the key arrives.
+	pending    *engine.Action
+	pendingTab *tab
+	prompt     string
+
+	// notice is what an action had to say before running — most often that
+	// nothing is selected. Cleared on the next keystroke, which is exactly
+	// as long as it is worth reading.
+	notice string
 }
+
+// cur is the tab the content box is showing.
+func (m *model) cur() *tab { return m.tabs[m.act] }
 
 // Run starts the TUI and blocks until the user quits.
 func Run(views []engine.View, version string) error {
@@ -150,16 +253,15 @@ func Run(views []engine.View, version string) error {
 	_, err := prog.Run()
 
 	// Whatever was still running has no one left to report to.
-	m.stop()
+	m.stopAll()
 	return err
 }
 
 func newModel(views []engine.View) *model {
 	m := &model{
-		spin:      spinner.New(spinner.WithSpinner(spinner.MiniDot)),
-		vp:        viewport.New(),
-		selection: map[string]bool{},
-		mouse:     true,
+		spin:  spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		vp:    viewport.New(),
+		mouse: true,
 	}
 	m.filter = textinput.New()
 	m.filter.Prompt = "/"
@@ -175,6 +277,11 @@ func newModel(views []engine.View) *model {
 	byGroup := map[string][]*engine.View{}
 	for i := range views {
 		v := &views[i]
+		// A view needing a parameter cannot be started from the menu, so it
+		// is not offered there; an action reaches it with one.
+		if !v.Listed() {
+			continue
+		}
 		if _, seen := byGroup[v.Group]; !seen {
 			order = append(order, v.Group)
 		}
@@ -197,6 +304,8 @@ func newModel(views []engine.View) *model {
 
 	// Start on the first real view rather than on a header.
 	m.cursor = m.next(-1, +1)
+	// The content box always has a tab, even before anything has run.
+	m.tabs = []*tab{newTab(m.selected(), nil)}
 
 	return m
 }
@@ -225,10 +334,10 @@ func (m *model) selected() *engine.View {
 
 // visible is the result after filtering: what the output pane renders.
 func (m *model) visible() engine.Table {
-	if m.res == nil {
+	if m.cur().res == nil {
 		return engine.Table{}
 	}
-	return filtered(*m.res, m.filter.Value())
+	return filtered(*m.cur().res, m.filter.Value())
 }
 
 func (m *model) rowCount() int { return len(m.visible().Rows) }
@@ -236,11 +345,35 @@ func (m *model) rowCount() int { return len(m.visible().Rows) }
 func (m *model) Init() tea.Cmd { return nil }
 
 // stop cancels the run in flight, if any.
-func (m *model) stop() {
-	if m.cancel != nil {
-		m.cancel()
-		m.cancel = nil
+// stopAll cancels every run in flight, on quit.
+func (m *model) stopAll() {
+	for _, t := range m.tabs {
+		t.stop()
 	}
+}
+
+// anyRunning reports whether a tab, active or not, has work in flight. The
+// spinner tick chain lives as long as one does.
+func (m *model) anyRunning() bool {
+	for _, t := range m.tabs {
+		if t.running {
+			return true
+		}
+	}
+	return false
+}
+
+// tabBySeq finds the tab a message belongs to. Sequence numbers come from
+// one counter and are never reused, so a run whose tab has since started a
+// newer one, or whose tab was closed altogether, finds nothing — one rule
+// covering every kind of staleness.
+func (m *model) tabBySeq(seq int) *tab {
+	for _, t := range m.tabs {
+		if t.seq == seq {
+			return t
+		}
+	}
+	return nil
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -265,47 +398,74 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case resultMsg:
-		// A superseded run finishing late must not clobber the current view.
-		if msg.seq != m.seq {
+		// A superseded run, or one whose tab is gone, has no one to report to.
+		t := m.tabBySeq(msg.seq)
+		if t == nil {
 			return m, nil
 		}
-		m.cancel = nil
-		m.running = false
+		t.cancel, t.running = nil, false
 
 		// Escape is a decision, not a failure. A deadline is a failure, but
 		// one worth naming plainly.
 		switch {
 		case errors.Is(msg.err, context.Canceled):
-			m.err = nil
+			t.err = nil
 		case errors.Is(msg.err, context.DeadlineExceeded):
-			m.err = fmt.Errorf("timed out after %s", runTimeout)
+			t.err = fmt.Errorf("timed out after %s", runTimeout)
 		default:
-			m.err = msg.err
+			t.err = msg.err
 		}
 
-		if m.err != nil {
-			m.res = nil
+		if t.err != nil {
+			t.res = nil
 		} else {
 			res := msg.res
-			m.res = &res
-			m.prune()
+			t.res, t.fetched = &res, time.Now()
+			t.prune()
 		}
-		m.showResult()
-		return m, m.scheduleRefresh()
+		// A result for a tab in the background must not scribble on the one
+		// the user is looking at.
+		if t == m.cur() {
+			m.showResult()
+		}
+		return m, m.scheduleRefresh(t)
+
+	case jobMsg:
+		t := m.tabBySeq(msg.seq)
+		if t == nil || t.job == nil {
+			return m, nil
+		}
+		t.cancel, t.running = nil, false
+		t.job.out, t.job.errs, t.job.done = msg.out, msg.errs, true
+
+		// The view the action changed is run again where it lives, so the
+		// fresh rows are already there when one escapes back to them.
+		var cmd tea.Cmd
+		if to := t.job.reload; to != nil {
+			cmd = m.launch(to)
+		}
+		if t == m.cur() {
+			m.showResult()
+		}
+		return m, cmd
 
 	case refreshMsg:
-		if msg.seq != m.seq || m.running {
+		// Only the tab on screen reloads on a tick: several tabs refreshing
+		// in the background is several scripts against a cluster nobody is
+		// watching. A backgrounded tab catches up when it comes forward.
+		t := m.tabBySeq(msg.seq)
+		if t == nil || t != m.cur() || t.running {
 			return m, nil
 		}
 		// While the filter is being typed a reload would fight the keyboard;
 		// skip this tick but keep the chain alive.
 		if m.filtering {
-			return m, m.scheduleRefresh()
+			return m, m.scheduleRefresh(t)
 		}
 		return m, m.reload()
 
 	case spinner.TickMsg:
-		if !m.running {
+		if !m.anyRunning() {
 			m.tickAlive = false
 			return m, nil
 		}
@@ -319,6 +479,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+
+	// A notice was written for the keystroke before this one.
+	m.notice = ""
+
+	// A pending confirmation swallows every key, so that a stray j or p
+	// cannot answer a question about changing things.
+	if m.pending != nil {
+		return m, m.answer(key)
+	}
 
 	// While typing a filter the input owns the keyboard, or "q" would quit
 	// halfway through a word.
@@ -342,13 +511,19 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	// Config keys come first so that a view can bind enter — which in the
+	// output pane means nothing else — as its one obvious action.
+	if a := m.actionFor(key); a != nil {
+		return m, m.fire(a)
+	}
+
 	switch key {
 	case "q", "ctrl+c":
-		m.stop()
+		m.stopAll()
 		return m, tea.Quit
 
 	case "/":
-		if m.res == nil {
+		if m.cur().res == nil {
 			return m, nil
 		}
 		m.filtering = true
@@ -371,14 +546,17 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "esc":
 		switch {
-		case m.running:
-			m.stop()
+		case m.cur().running:
+			m.cur().stop()
 		case m.filter.Value() != "":
 			m.filter.SetValue("")
 			m.showResult()
-		case len(m.selection) > 0:
-			m.selection = map[string]bool{}
+		case len(m.cur().selection) > 0:
+			m.cur().selection = map[string]bool{}
 			m.showResult()
+		case m.act > 0:
+			// A drill-down is closed by the key one already reaches for.
+			return m, m.closeTab()
 		case m.focus == paneOutput:
 			m.focus = paneList
 			m.showResult()
@@ -431,6 +609,15 @@ func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// which is how one copies a node name out of a row.
 		m.mouse = !m.mouse
 		return m, nil
+
+	case "]":
+		return m, m.activate(m.act + 1)
+
+	case "[", "shift+tab":
+		return m, m.activate(m.act - 1)
+
+	case "x":
+		return m, m.closeTab()
 	}
 
 	// Anything else scrolls the output pane.
@@ -470,6 +657,10 @@ func (m *model) onWheel(button tea.MouseButton, x int) {
 // onClick puts the cursor where it was pointed. In the menu that also runs
 // the view: a menu entry one clicks is a thing one wants to see.
 func (m *model) onClick(x, y int) tea.Cmd {
+	if i := m.tabAt(x, y); i >= 0 {
+		return m.activate(i)
+	}
+
 	if x < sidebarWidth {
 		i := m.entryAt(y)
 		if i < 0 {
@@ -484,7 +675,7 @@ func (m *model) onClick(x, y int) tea.Cmd {
 	if row < 0 {
 		return nil
 	}
-	m.focus, m.row = paneOutput, row
+	m.focus, m.cur().row = paneOutput, row
 	m.showResult()
 	return nil
 }
@@ -493,7 +684,7 @@ func (m *model) onClick(x, y int) tea.Cmd {
 // is looking around, not choosing.
 func (m *model) scrollSidebar(step int) {
 	lines, _ := m.sidebarRender()
-	h := max(m.bodyBoxHeight()-2, 1)
+	h := max(m.sidebarBoxHeight()-2, 1)
 	if len(lines) <= h {
 		return
 	}
@@ -523,7 +714,7 @@ func (m *model) rowAt(y int) int {
 // and everything outside the box.
 func (m *model) entryAt(y int) int {
 	lines, owner := m.sidebarRender()
-	h := max(m.bodyBoxHeight()-2, 1)
+	h := max(m.sidebarBoxHeight()-2, 1)
 
 	top := titleHeight + 1
 	if y < top || y >= top+h {
@@ -542,7 +733,7 @@ func (m *model) toggleFocus() {
 		if m.rowCount() == 0 {
 			return
 		}
-		m.focus, m.row = paneOutput, 0
+		m.focus, m.cur().row = paneOutput, 0
 	} else {
 		m.focus = paneList
 	}
@@ -558,7 +749,7 @@ func (m *model) move(step int) {
 	}
 
 	if n := m.rowCount(); n > 0 {
-		m.row = min(max(m.row+step, 0), n-1)
+		m.cur().row = min(max(m.cur().row+step, 0), n-1)
 		m.showResult()
 	}
 }
@@ -592,9 +783,9 @@ func (m *model) jump(dir int) {
 
 	if n := m.rowCount(); n > 0 {
 		if dir < 0 {
-			m.row = 0
+			m.cur().row = 0
 		} else {
-			m.row = n - 1
+			m.cur().row = n - 1
 		}
 		m.showResult()
 	}
@@ -620,7 +811,7 @@ func (m *model) follow(cursor int) {
 // of the render so that drawing the sidebar stays free of side effects.
 func (m *model) syncSidebar() {
 	lines, owner := m.sidebarRender()
-	h := max(m.bodyBoxHeight()-2, 1)
+	h := max(m.sidebarBoxHeight()-2, 1)
 
 	cursor := -1
 	for line, entry := range owner {
@@ -652,13 +843,13 @@ func (m *model) toggleRow() {
 	}
 	m.clampRow()
 
-	key := vis.Rows[m.row].Key
-	if m.selection[key] {
-		delete(m.selection, key)
+	key := vis.Rows[m.cur().row].Key
+	if m.cur().selection[key] {
+		delete(m.cur().selection, key)
 	} else {
-		m.selection[key] = true
+		m.cur().selection[key] = true
 	}
-	m.row = min(m.row+1, len(vis.Rows)-1)
+	m.cur().row = min(m.cur().row+1, len(vis.Rows)-1)
 	m.showResult()
 }
 
@@ -672,86 +863,90 @@ func (m *model) toggleAll() {
 
 	all := true
 	for _, r := range vis.Rows {
-		if !m.selection[r.Key] {
+		if !m.cur().selection[r.Key] {
 			all = false
 			break
 		}
 	}
 	for _, r := range vis.Rows {
 		if all {
-			delete(m.selection, r.Key)
+			delete(m.cur().selection, r.Key)
 		} else {
-			m.selection[r.Key] = true
+			m.cur().selection[r.Key] = true
 		}
 	}
 	m.showResult()
 }
 
-// prune drops selected keys the current result no longer contains: a
+// prune drops selected keys the latest result no longer contains: a
 // selection must never silently stand for rows that are gone.
-func (m *model) prune() {
-	if len(m.selection) == 0 || m.res == nil {
+func (t *tab) prune() {
+	if len(t.selection) == 0 || t.res == nil {
 		return
 	}
 	present := map[string]bool{}
-	for _, r := range m.res.Rows {
+	for _, r := range t.res.Rows {
 		present[r.Key] = true
 	}
-	for key := range m.selection {
+	for key := range t.selection {
 		if !present[key] {
-			delete(m.selection, key)
+			delete(t.selection, key)
 		}
 	}
 }
 
 func (m *model) clampRow() {
 	if n := m.rowCount(); n > 0 {
-		m.row = min(max(m.row, 0), n-1)
+		m.cur().row = min(max(m.cur().row, 0), n-1)
 	} else {
-		m.row = 0
+		m.cur().row = 0
 	}
 }
 
-// open runs the view under the sidebar cursor from scratch: a new view means
-// a new filter, a new selection, a new cursor.
+// open runs the view under the sidebar cursor from scratch. Picking from the
+// menu is starting over, not drilling: every tab opened by an action goes.
 func (m *model) open() tea.Cmd {
+	m.closeFrom(1)
+	m.tabs[0], m.act = newTab(m.selected(), nil), 0
 	m.filter.SetValue("")
-	m.selection = map[string]bool{}
-	m.focus, m.row = paneList, 0
-	m.res, m.err = nil, nil
-	return m.launch()
+	m.focus = paneList
+	return m.launch(m.cur())
 }
 
-// reload re-runs the current view but keeps the context a reload must not
+// reload re-runs the active view but keeps the context a reload must not
 // eat: the filter, the selection, the focused row.
 func (m *model) reload() tea.Cmd {
-	if m.res == nil && m.err == nil && !m.running {
+	t := m.cur()
+	if t.res == nil && t.err == nil && !t.running {
 		// Nothing has run yet; a reload is an open.
 		return m.open()
 	}
-	return m.launch()
+	return m.launch(t)
 }
 
-// launch starts the current view's pipeline inside a tea.Cmd. Nothing blocks
-// here: the work happens in the command, which is what keeps the UI painting
-// while it runs.
-func (m *model) launch() tea.Cmd {
-	cur := m.selected()
-	if cur == nil {
+// launch starts one tab's pipeline inside a tea.Cmd. Nothing blocks here:
+// the work happens in the command, which is what keeps the UI painting while
+// it runs.
+//
+// The closure captures the sequence number rather than the tab, because
+// delivery is decided by that number alone: a tab closed mid-run simply has
+// no one left to deliver to.
+func (m *model) launch(t *tab) tea.Cmd {
+	if t.view == nil {
 		return nil
 	}
 
-	m.stop()
+	t.stop()
 	m.seq++
-	m.running, m.err = true, nil
+	t.seq, t.running, t.err = m.seq, true, nil
 
 	ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
-	m.cancel = cancel
+	t.cancel = cancel
 
-	seq := m.seq
+	seq, view, args := t.seq, t.view, t.args
 	run := func() tea.Msg {
 		defer cancel()
-		res, err := cur.Run(ctx)
+		res, err := view.Run(ctx, args)
 		return resultMsg{seq: seq, res: res, err: err}
 	}
 
@@ -764,14 +959,84 @@ func (m *model) launch() tea.Cmd {
 	return tea.Batch(run, m.spin.Tick)
 }
 
-// scheduleRefresh arms the auto-reload of a view that asked for one.
-func (m *model) scheduleRefresh() tea.Cmd {
-	cur := m.selected()
-	if cur == nil || cur.Refresh <= 0 {
+// scheduleRefresh arms the auto-reload of a view that asked for one. Only
+// the tab on screen gets a tick; see the refreshMsg branch.
+func (m *model) scheduleRefresh(t *tab) tea.Cmd {
+	if t != m.cur() || t.view == nil || t.view.Refresh <= 0 {
 		return nil
 	}
-	seq := m.seq
-	return tea.Tick(cur.Refresh, func(time.Time) tea.Msg { return refreshMsg{seq: seq} })
+	seq := t.seq
+	return tea.Tick(t.view.Refresh, func(time.Time) tea.Msg { return refreshMsg{seq: seq} })
+}
+
+// park saves the transient state of the tab about to be left. Anything not
+// parked here is what the user will find missing on the way back.
+func (m *model) park() {
+	t := m.cur()
+	t.yOff, t.xOff, t.filter = m.vp.YOffset(), m.vp.XOffset(), m.filter.Value()
+}
+
+// closeFrom drops the tabs from i on, cancelling their runs.
+func (m *model) closeFrom(i int) {
+	if i >= len(m.tabs) {
+		return
+	}
+	for _, t := range m.tabs[i:] {
+		t.stop()
+	}
+	m.tabs = m.tabs[:i]
+	m.act = min(m.act, len(m.tabs)-1)
+}
+
+// activate switches the content box to tab i, parking the scroll position
+// and the filter of the one being left: coming back has to land exactly
+// where one left, which is the whole reason tabs replaced the view stack.
+func (m *model) activate(i int) tea.Cmd {
+	if i < 0 || i >= len(m.tabs) || i == m.act {
+		return nil
+	}
+	m.park()
+
+	m.act = i
+	t := m.cur()
+	m.filter.SetValue(t.filter)
+
+	// The offsets go back before showResult, whose follow() would otherwise
+	// drag the position to the cursor it finds off screen.
+	m.vp.SetYOffset(t.yOff)
+	m.vp.SetXOffset(t.xOff)
+	m.showResult()
+	return m.resume(t)
+}
+
+// closeTab drops the active tab and falls back to the one it was opened
+// from. The first tab stays: the content box always shows something.
+func (m *model) closeTab() tea.Cmd {
+	if m.act == 0 {
+		return nil
+	}
+	to := m.act - 1
+	m.closeFrom(m.act)
+	m.act = to
+
+	t := m.cur()
+	m.filter.SetValue(t.filter)
+	m.vp.SetYOffset(t.yOff)
+	m.vp.SetXOffset(t.xOff)
+	m.showResult()
+	return m.resume(t)
+}
+
+// resume re-arms a returning tab's refresh, reloading at once when the data
+// aged past the interval while the tab sat in the background.
+func (m *model) resume(t *tab) tea.Cmd {
+	if t.view == nil || t.view.Refresh <= 0 || t.running {
+		return nil
+	}
+	if !t.fetched.IsZero() && time.Since(t.fetched) >= t.view.Refresh {
+		return m.launch(t)
+	}
+	return m.scheduleRefresh(t)
 }
 
 // contentWidth is the space the output widgets may actually paint on: the
@@ -784,10 +1049,35 @@ func (m *model) contentWidth() int {
 	return 1
 }
 
-// bodyBoxHeight is the outer height of the sidebar and content boxes:
-// whatever the title and footer frames leave.
+// bodyBoxHeight is the outer height of the content box: whatever the title,
+// the footer and the action box leave.
 func (m *model) bodyBoxHeight() int {
-	return max(m.height-frameChrome, 3)
+	return max(m.height-frameChrome-m.actionBoxHeight(), 3)
+}
+
+// sidebarBoxHeight is the outer height of the menu, which runs the whole
+// left side: the content box and the action box under it are one column,
+// the menu beside them is one box.
+func (m *model) sidebarBoxHeight() int {
+	return m.bodyBoxHeight() + m.actionBoxHeight()
+}
+
+// actionBoxHeight is the room the action box takes, or none when the view
+// has nothing to offer — an empty frame would cost three lines to say so.
+func (m *model) actionBoxHeight() int {
+	if m.pending == nil && len(m.viewActions()) == 0 {
+		return 0
+	}
+	return titleHeight
+}
+
+// viewActions is what the view on screen offers. A job tab offers nothing:
+// it is a record of what was done, not something to act on.
+func (m *model) viewActions() []engine.Action {
+	if t := m.cur(); t.view != nil && t.job == nil {
+		return t.view.Actions
+	}
+	return nil
 }
 
 // vpHeight is the viewport's share of the content box: the inner height,
@@ -801,9 +1091,10 @@ func (m *model) vpHeight() int {
 }
 
 // hasTable reports whether the content box is showing rows, as opposed to a
-// spinner, an error or a note that there is nothing to see.
+// job, a spinner, an error or a note that there is nothing to see.
 func (m *model) hasTable() bool {
-	return m.err == nil && !m.running && m.res != nil && m.rowCount() > 0
+	t := m.cur()
+	return t.job == nil && t.err == nil && !t.running && t.res != nil && m.rowCount() > 0
 }
 
 // statusLines is the room the status bar takes, so the viewport shrinks
@@ -844,12 +1135,24 @@ func filtered(t engine.Table, needle string) engine.Table {
 // re-sized here rather than only on window changes, because the header and
 // the status line coming and going alter the viewport's share of the frame.
 func (m *model) showResult() {
+	m.vp.SetWidth(m.contentWidth())
+	m.vp.SetHeight(m.vpHeight())
+
+	// A job tab shows commands and their output, not rows.
+	if t := m.cur(); t.job != nil {
+		lines := t.job.lines()
+		m.head = ""
+		m.vp.SetContentLines(lines)
+		m.lines = len(lines)
+		return
+	}
+
 	vis := m.visible()
 
 	cursor := -1
 	if m.focus == paneOutput && len(vis.Rows) > 0 {
 		m.clampRow()
-		cursor = m.row
+		cursor = m.cur().row
 	}
 
 	lines := render.Table(vis, m.tableStyle(vis, cursor))
@@ -863,8 +1166,6 @@ func (m *model) showResult() {
 		lines = append(lines, noteStyle.Render("! "+note))
 	}
 
-	m.vp.SetWidth(m.contentWidth())
-	m.vp.SetHeight(m.vpHeight())
 	m.vp.SetContentLines(lines)
 	m.lines = len(lines)
 	m.follow(cursor)
@@ -880,7 +1181,7 @@ func (m *model) tableStyle(vis engine.Table, cursor int) render.Style {
 			switch {
 			case row == cursor:
 				return cursorRow.Render(s)
-			case row < len(vis.Rows) && m.selection[vis.Rows[row].Key]:
+			case row < len(vis.Rows) && m.cur().selection[vis.Rows[row].Key]:
 				return selectedRow.Render(s)
 			}
 			switch e {
@@ -895,38 +1196,6 @@ func (m *model) tableStyle(vis engine.Table, cursor int) render.Style {
 			}
 		},
 	}
-}
-
-// frame draws a w×h box around lines, rounded corners, one space of padding
-// inside. Labels ride in the top border: left is the tab — a future
-// drill-down grows into a row of them, not into a new layout — and right is
-// the scroll position, which belongs on the frame rather than costing a line
-// of the content it describes.
-func frame(lines []string, w, h int, bs lipgloss.Style, left, right string) string {
-	w, h = max(w, boxPad), max(h, 2)
-	inner := w - 2    // between the border columns
-	text := inner - 2 // minus the padding spaces
-	clip := lipgloss.NewStyle().MaxWidth(text)
-
-	// Both labels are clipped before the fill is measured, so a narrow
-	// window can never push the corner off the end of the line.
-	left = lipgloss.NewStyle().MaxWidth(max(text-1, 0)).Render(left)
-	right = lipgloss.NewStyle().MaxWidth(max(text-1-lipgloss.Width(left), 0)).Render(right)
-	fill := max(inner-1-lipgloss.Width(left)-lipgloss.Width(right), 0)
-
-	out := make([]string, 0, h)
-	out = append(out, bs.Render("╭─")+left+bs.Render(strings.Repeat("─", fill))+right+bs.Render("╮"))
-	side := bs.Render("│")
-	for i := 0; i < h-2; i++ {
-		line := ""
-		if i < len(lines) {
-			line = clip.Render(lines[i])
-		}
-		pad := max(text-lipgloss.Width(line), 0)
-		out = append(out, side+" "+line+strings.Repeat(" ", pad)+" "+side)
-	}
-	out = append(out, bs.Render("╰"+strings.Repeat("─", inner)+"╯"))
-	return strings.Join(out, "\n")
 }
 
 func (m *model) View() tea.View {
@@ -953,34 +1222,64 @@ func (m *model) View() tea.View {
 		outBorder = focusBorder
 	}
 
-	title := frame([]string{m.titleLine()}, m.width, 3, borderStyle, "", "")
+	title := box{w: m.width, h: titleHeight, border: borderStyle}.
+		render([]string{m.titleLine()})
+
+	// The right side is a column: the output, and under it what can be done
+	// with it. The menu beside them is one box spanning both.
+	tabs, _ := m.tabBar(m.tabBarWidth())
+	right := box{w: m.width - sidebarWidth, h: m.bodyBoxHeight(), border: outBorder,
+		top: tabs, topRight: m.scrollLabel()}.render(m.contentLines())
+
+	if h := m.actionBoxHeight(); h > 0 {
+		// A pending question owns the box and takes the eye with it.
+		border := borderStyle
+		if m.pending != nil {
+			border = promptStyle
+		}
+		right = lipgloss.JoinVertical(lipgloss.Left, right,
+			box{w: m.width - sidebarWidth, h: h, border: border}.render([]string{m.actionLine()}))
+	}
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top,
-		frame(m.sidebarLines(), sidebarWidth, m.bodyBoxHeight(), sideBorder, "", m.sidebarMore()),
-		frame(m.contentLines(), m.width-sidebarWidth, m.bodyBoxHeight(), outBorder, m.tabLabel(), m.scrollLabel()),
+		box{w: sidebarWidth, h: m.sidebarBoxHeight(), border: sideBorder,
+			topRight: m.sidebarMore()}.render(m.sidebarLines()),
+		right,
 	)
 
 	footer := lipgloss.JoinHorizontal(lipgloss.Top,
-		frame([]string{descStyle.Render(m.version)}, sidebarWidth, 3, borderStyle, "", ""),
-		frame([]string{m.help()}, m.width-sidebarWidth, 3, borderStyle, "", ""),
+		box{w: sidebarWidth, h: titleHeight, border: borderStyle}.
+			render([]string{descStyle.Render(m.version)}),
+		box{w: m.width - sidebarWidth, h: titleHeight, border: borderStyle}.
+			render([]string{m.help()}),
 	)
 
 	v.Content = lipgloss.JoinVertical(lipgloss.Left, title, body, footer)
 	return v
 }
 
-// titleLine reads tool · id · title. The view title is the first thing
-// dropped when space runs short: the id is what you navigate by.
+// titleLine reads tool · id args · title. It describes the tab on screen,
+// not the entry the sidebar cursor happens to rest on. The title is the
+// first thing dropped when space runs short: the id is what you navigate by,
+// and the arguments are what tell two tabs of the same view apart.
 func (m *model) titleLine() string {
 	sep := sepStyle.Render("  ·  ")
 
 	name := titleStyle.Render("aldediggi")
-	cur := m.selected()
+	if j := m.cur().job; j != nil {
+		return name + sep + titleStyle.Render(j.name) + sep +
+			descStyle.Render(plural(len(j.steps), "step"))
+	}
+	cur := m.cur().view
 	if cur == nil {
 		return name
 	}
 
-	line := name + sep + titleStyle.Render(cur.ID)
+	id := cur.ID
+	if arg := m.argLabel(); arg != "" {
+		id += " " + arg
+	}
+	line := name + sep + titleStyle.Render(id)
 
 	// Everything below needs a known width; before the first WindowSizeMsg
 	// there is none to budget against.
@@ -997,18 +1296,20 @@ func (m *model) titleLine() string {
 	return line
 }
 
-// tabLabel names the content box's one tab: the view on screen. Drill-down
-// targets would join it as further tabs.
-func (m *model) tabLabel() string {
-	cur := m.selected()
-	if cur == nil {
+// argLabel names the parameters the tab was opened with, so a drilled-into
+// view says which pool or node it is about.
+func (m *model) argLabel() string {
+	t := m.cur()
+	if t.view == nil {
 		return ""
 	}
-	label := cur.Name
-	if label == "" {
-		label = cur.ID
+	var vals []string
+	for _, p := range t.view.Params {
+		if v := t.args[p.Name]; v != "" {
+			vals = append(vals, v)
+		}
 	}
-	return tabStyle.Render(" " + label + " ")
+	return strings.Join(vals, " ")
 }
 
 // scrollLabel says where in the table the view sits. It rides in the top
@@ -1027,7 +1328,7 @@ func (m *model) scrollLabel() string {
 // not simply invisible.
 func (m *model) sidebarMore() string {
 	lines, _ := m.sidebarRender()
-	if len(lines) <= max(m.bodyBoxHeight()-2, 1) {
+	if len(lines) <= max(m.sidebarBoxHeight()-2, 1) {
 		return ""
 	}
 	return dividerStyle.Render(" ↕ ")
@@ -1038,10 +1339,14 @@ func (m *model) sidebarMore() string {
 // when there is one.
 func (m *model) contentLines() []string {
 	var lines []string
-	if m.hasTable() {
+	switch {
+	case m.cur().job != nil:
+		// A job shows its commands from the moment it opens, running or not.
+		lines = strings.Split(m.vp.View(), "\n")
+	case m.hasTable():
 		lines = append(lines, m.headLine())
 		lines = append(lines, strings.Split(m.vp.View(), "\n")...)
-	} else {
+	default:
 		lines = strings.Split(m.pane(), "\n")
 	}
 
@@ -1104,7 +1409,7 @@ func sidebarOffset(total, h, want int) int {
 // sidebarLines is the slice of the menu that fits the box.
 func (m *model) sidebarLines() []string {
 	lines, _ := m.sidebarRender()
-	h := max(m.bodyBoxHeight()-2, 1)
+	h := max(m.sidebarBoxHeight()-2, 1)
 	if len(lines) <= h {
 		return lines
 	}
@@ -1114,13 +1419,13 @@ func (m *model) sidebarLines() []string {
 
 func (m *model) pane() string {
 	switch {
-	case m.err != nil:
-		return errStyle.Render("error: " + m.err.Error())
+	case m.cur().err != nil:
+		return errStyle.Render("error: " + m.cur().err.Error())
 
-	case m.running:
+	case m.cur().running:
 		return fmt.Sprintf("%s running…", m.spin.View())
 
-	case m.res == nil:
+	case m.cur().res == nil:
 		return helpStyle.Render("press ⏎ to run")
 	}
 
@@ -1145,11 +1450,14 @@ func (m *model) statusLine() string {
 	} else if m.filter.Value() != "" {
 		parts = append(parts, dividerStyle.Render("/"+m.filter.Value()))
 	}
-	if m.res != nil && (m.filtering || m.filter.Value() != "") {
-		parts = append(parts, dividerStyle.Render(fmt.Sprintf("%d of %d", m.rowCount(), len(m.res.Rows))))
+	if m.cur().res != nil && (m.filtering || m.filter.Value() != "") {
+		parts = append(parts, dividerStyle.Render(fmt.Sprintf("%d of %d", m.rowCount(), len(m.cur().res.Rows))))
 	}
-	if n := len(m.selection); n > 0 {
+	if n := len(m.cur().selection); n > 0 {
 		parts = append(parts, warnStyle.Render(fmt.Sprintf("%d selected", n)))
+	}
+	if m.notice != "" {
+		parts = append(parts, noteStyle.Render(m.notice))
 	}
 
 	if len(parts) == 0 {
@@ -1182,9 +1490,11 @@ type helpKey struct {
 func (m *model) help() string {
 	var keys []helpKey
 	switch {
+	case m.pending != nil:
+		keys = []helpKey{{"y confirm", 4}, {"any other key cancels", 1}}
 	case m.filtering:
 		keys = []helpKey{{"⏎ keep filter", 1}, {"esc clear", 2}}
-	case m.running:
+	case m.cur().running:
 		keys = []helpKey{{"esc cancel", 2}, {"q quit", 1}}
 	default:
 		if m.focus == paneList {
@@ -1199,6 +1509,9 @@ func (m *model) help() string {
 			helpKey{"r reload", 1},
 			helpKey{"q quit", 4},
 		)
+		if len(m.tabs) > 1 {
+			keys = append(keys, helpKey{"][ tabs", 2}, helpKey{"esc back", 4})
+		}
 		if m.lines > m.vp.Height() {
 			keys = append(keys, helpKey{"⇞⇟ page", 2})
 		}

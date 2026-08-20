@@ -47,7 +47,7 @@ func loaded(t *testing.T) *model {
 	m.Update(key("down")) // demo.nodes
 	m.Update(key("enter"))
 
-	res, err := m.selected().Run(context.Background())
+	res, err := m.selected().Run(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestEnterRunsWithoutBlocking(t *testing.T) {
 	m := sized(t)
 
 	_, cmd := m.Update(key("enter"))
-	if !m.running {
+	if !m.cur().running {
 		t.Fatal("model is not marked running")
 	}
 	if cmd == nil {
@@ -112,7 +112,7 @@ func TestEnterRunsWithoutBlocking(t *testing.T) {
 func TestResultIsRenderedIntoTable(t *testing.T) {
 	m := loaded(t)
 
-	if m.running {
+	if m.cur().running {
 		t.Error("still running after result")
 	}
 
@@ -132,7 +132,7 @@ func TestStaleResultIsIgnored(t *testing.T) {
 	stale := engine.Table{Cols: []string{"N"}, Rows: []engine.Row{row("stale")}}
 	m.Update(resultMsg{seq: current - 1, res: stale})
 
-	if !m.running {
+	if !m.cur().running {
 		t.Error("a superseded result ended the current run")
 	}
 	if strings.Contains(m.View().Content, "stale") {
@@ -202,7 +202,7 @@ func TestHelpLineSurvivesNarrowWindows(t *testing.T) {
 	m = next.(*model)
 
 	m.Update(key("down"))
-	res, err := m.selected().Run(context.Background())
+	res, err := m.selected().Run(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +298,7 @@ func TestRefreshingViewSchedulesATick(t *testing.T) {
 	m = next.(*model)
 
 	m.Update(key("enter"))
-	res, _ := m.selected().Run(context.Background())
+	res, _ := m.selected().Run(context.Background(), nil)
 	_, cmd := m.Update(resultMsg{seq: m.seq, res: res})
 	if cmd == nil {
 		t.Fatal("a refreshing view scheduled no tick after its result")
@@ -306,11 +306,11 @@ func TestRefreshingViewSchedulesATick(t *testing.T) {
 
 	// The tick re-runs the view — but only when it is not stale.
 	m.Update(refreshMsg{seq: m.seq - 1})
-	if m.running {
+	if m.cur().running {
 		t.Fatal("a stale tick re-ran the view")
 	}
 	m.Update(refreshMsg{seq: m.seq})
-	if !m.running {
+	if !m.cur().running {
 		t.Fatal("the tick did not re-run the view")
 	}
 }

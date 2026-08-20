@@ -95,7 +95,7 @@ esac
 		t.Fatal("example config lost the nodes.status view")
 	}
 
-	res, err := nodes.Run(t.Context())
+	res, err := nodes.Run(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -20,8 +20,31 @@ type Def struct {
 	Refresh time.Duration
 	Rows    string // jq: one stdout JSON value → row objects
 	Key     string // jq: row → identity; empty means no stable identity
+	Params  []Param
 	Columns []ColumnDef
 	Sort    []SortDef
+	Actions []ActionDef
+}
+
+// ActionDef declares one action. Exactly one of Open or Script is set.
+type ActionDef struct {
+	Key   string
+	Name  string
+	Short string
+
+	// Open names the view a navigating action moves to; Args are jq
+	// expressions producing its parameters from the row under the cursor.
+	Open string
+	Args map[string]string
+
+	// Script is run once per selected row, with Env evaluated against that
+	// row. Confirm is a jq expression over the array of selected rows
+	// producing the question; empty runs unasked.
+	Shell   []string
+	Script  string
+	Env     map[string]string
+	Confirm string
+	Reload  bool
 }
 
 // ColumnDef projects one field of a row object into a cell.
@@ -105,15 +128,27 @@ func Compile(d Def) (View, error) {
 	if i := strings.Index(d.ID, "."); i >= 0 {
 		group, name = d.ID[:i], d.ID[i+1:]
 	}
+	actions, err := compileActions(d)
+	if err != nil {
+		return View{}, err
+	}
+
 	return View{
 		ID:      d.ID,
 		Name:    name,
 		Title:   title,
 		Group:   group,
 		Refresh: d.Refresh,
+		Params:  d.Params,
+		Actions: actions,
 		Run:     cv.run,
 	}, nil
 }
+
+// argsVar is the name under which a view's current parameters are exposed to
+// action expressions. It is what makes "the view's parameter, else the row"
+// sayable in config: `$args.node // .metadata.name`.
+const argsVar = "$args"
 
 func compileExpr(view, field, src string) (*gojq.Code, error) {
 	if src == "" {
@@ -123,11 +158,36 @@ func compileExpr(view, field, src string) (*gojq.Code, error) {
 	if err != nil {
 		return nil, fmt.Errorf("view %q: %s: %v", view, field, err)
 	}
-	code, err := gojq.Compile(q)
+	code, err := gojq.Compile(q, gojq.WithVariables([]string{argsVar}))
 	if err != nil {
 		return nil, fmt.Errorf("view %q: %s: %v", view, field, err)
 	}
 	return code, nil
+}
+
+// argsValue renders the current parameters the way a jq expression sees
+// them: a plain object, so `$args.node` works and a missing one is null.
+func argsValue(cur Args) any {
+	out := map[string]any{}
+	for k, v := range cur {
+		out[k] = v
+	}
+	return out
+}
+
+// env is what the view's script sees. Every declared parameter is set, empty
+// if it was not given, so a script can test it with [ -n "$x" ] rather than
+// having to guess whether the variable exists at all.
+func (cv *compiled) env(args Args) Args {
+	out := Args{}
+	for _, p := range cv.def.Params {
+		value := args[p.Name]
+		if value == "" {
+			value = p.Default
+		}
+		out[p.Name] = value
+	}
+	return out
 }
 
 // compiled is the runnable form: every expression parsed, every sort key
@@ -155,8 +215,11 @@ type sortKey struct {
 // firstValue runs a compiled expression against one input and returns the
 // first result. A query yielding nothing is an error: a column that silently
 // produces no value would be indistinguishable from an empty one.
-func firstValue(ctx context.Context, code *gojq.Code, in any) (any, error) {
-	iter := code.RunWithContext(ctx, in)
+//
+// Every expression is compiled with the same one variable, so every run must
+// hand it the current parameters — see argsVar.
+func firstValue(ctx context.Context, code *gojq.Code, in any, cur Args) (any, error) {
+	iter := code.RunWithContext(ctx, in, argsValue(cur))
 	v, ok := iter.Next()
 	if !ok {
 		return nil, fmt.Errorf("expression produced no value")

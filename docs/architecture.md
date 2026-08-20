@@ -59,6 +59,92 @@ user input into code is an injection hole; an environment variable is not.
 Expressions can be developed against real command output with real jq and
 pasted into the config unchanged.
 
+## Actions
+
+A view produces rows; an **action** does something with the rows it is
+showing. There is one mechanism, with two kinds:
+
+| kind | declared by | operates on | result |
+|---|---|---|---|
+| navigate | `open:` | the **cursor row**, always | opens the target view in a new tab |
+| run | `script:` | the **selection** — refuses when there is none | opens a tab showing the commands, then their output |
+
+Both kinds open a tab. `esc` closes it either way.
+
+Drill-down is therefore not a feature of its own: it is an action that
+navigates. A dedicated `drilldown:` schema would have to be un-built the
+moment someone wants to cordon a node.
+
+```yaml
+actions:
+  - key: enter                     # the one obvious action
+    name: nodes
+    open: nodes.status
+    args:
+      selector: <jq over the cursor row>
+
+  - key: p
+    name: pause
+    confirm: '"Pause \(map(.metadata.name) | join(", "))"'   # over the row array
+    env: { name: .metadata.name }                            # per row
+    script: kubectl patch machineconfigpool "$name" …
+    reload: true
+```
+
+A run action **opens a tab of its own** showing the invocations it is about
+to make, one per selected row, before anything runs — and the confirmation
+sits under them, so the question is asked with the command in plain sight.
+`y` runs them and the output appears beside each invocation; `esc` closes the
+tab and returns to the view.
+
+That tab is why planning is separate from running in the engine: `Plan`
+turns rows into `Step`s without executing any, and `Step.Run` executes one.
+A step is deliberately **not** rendered as a single shell-quoted line, which
+would be a fiction — the values never enter the script text. It shows the
+environment, the shell, and the script as written:
+
+```
+pause  infra
+  name=infra
+  sh -c
+    kubectl patch machineconfigpool "$name" --type merge -p '…'
+  machineconfigpool/infra patched
+```
+
+One step per row means each call names exactly one object, so a partial
+failure is attributable ("2 of 5 steps failed" closes the tab's listing) and
+there is no selector that could match something else. `reload: true` re-runs
+the source view in **its own** tab, so the fresh rows are already there when
+one escapes back to them.
+
+Two deliberate departures from the previous generation of this tool:
+
+- **A mutation requires an explicit selection.** The old rule was "selection
+  narrows, rather than being its own concept" — the *filter* was the
+  selector, so `/OutOfSync` plus the action key hit all fourteen. Nothing is
+  lost by reversing it, because `a` selects every row the filter left: the
+  bulk case is `/OutOfSync`, `a`, `p`, and that one extra keystroke is the
+  whole point. A forgotten filter can no longer turn a mutation loose.
+- **A navigation always uses the cursor row.** The old tool had to refuse
+  when 0 or several rows were in scope (`select one pool first (14 shown)`);
+  with a row cursor that error disappears.
+
+`confirm` supplies the verb; the **engine appends the count**, so a
+confirmation that fails to say how much it touches cannot be written.
+
+Parameters and `env` values reach a script as **environment variables**,
+never templated into it. Two rules follow from that:
+
+- names must match `[a-z][a-z0-9_]*` — lowercase-only keeps them clear of
+  `PATH`, `HOME` and `IFS` without a list of forbidden names;
+- use `if [ -n "$x" ]; then set -- …; fi`, **not** `[ -n "$x" ] && set -- …`:
+  the `&&` form leaves exit status 1 when the parameter is empty, which the
+  runner would report as a failed script.
+
+There is no `hidden:` flag. A view with a **required** parameter cannot be
+started from the menu — running it bare would show some arbitrary object as
+if it were the answer — so it is simply not listed, and an action reaches it.
+
 ## Config schema
 
 ```yaml
@@ -128,14 +214,28 @@ fixed: escape sequences count towards the width of everything that measures
 naively (text/tabwriter, bubbles/table), which is why cells never contain
 escape codes and why the table widget is not `bubbles/table`.
 
-## Selection
+## Selection and tabs
 
-The table view selects rows independently of whether anything acts on them:
-`space` toggles, `a` toggles everything the filter left, `esc` clears. The
-selection is a set of row **keys**, so it survives reloads and re-sorting;
-keys that vanish from the result are pruned. When actions return, the rule
-is: an action's input is the selection if there is one, otherwise all
-filtered rows — always what the user can see, never the raw stream.
+`space` toggles a row, `a` toggles everything the filter left, `esc` clears.
+The selection is a set of row **keys**, so it survives reloads and
+re-sorting; keys that vanish from the result are pruned.
+
+A navigating action opens its target in a **new tab** in the content box's
+top border. Tabs are one path, not a heap of windows: drilling from tab N
+truncates whatever was opened from it, and picking a view in the menu
+collapses back to one. `]` and `[` move between them, `esc` and `x` close
+one, and a click activates one.
+
+Each tab keeps its own fetched table, filter, selection, row cursor and
+scroll position, so switching is instant and coming back lands exactly where
+one left. That is the point of tabs: the old view stack re-ran the parent on
+the way back and lost all four. `r` answers staleness.
+
+An auto-`refresh` **pauses** while its tab is in the background — five tabs
+on a ten-second refresh is five concurrent scripts against a cluster nobody
+is watching — and catches up on return if the data aged past the interval. A
+run in flight when its tab goes to the background finishes into that tab and
+only redraws when the tab comes forward.
 
 ## Layout
 
@@ -159,12 +259,25 @@ examples/          shipped example config, kept green by a test
   discards results of superseded runs, and one spinner tick chain is kept
   alive at a time.
 - The run timeout (30s) is the TUI's policy; the engine just honours ctx.
-- The screen is four framed boxes: title, sidebar and content side by side,
-  and a split footer — version on the sidebar's width, key legend on the
-  content's. The frames are drawn by hand rather than with lipgloss borders,
-  because the content box carries labels *inside* its top border: the view's
-  tab on the left (drill-down will add more) and the scroll position on the
-  right, where it costs no row of the table it describes.
+- The screen is framed boxes: the title across the top; the menu down the
+  left; the output and, under it, the view's actions in a box of their own;
+  a split footer — version on the menu's width, key legend on the output's.
+  The menu is one box spanning the output and the action box beside it. A
+  view with no actions gets no empty frame: three lines to say so would be
+  three lines of table.
+- The frames are drawn by hand rather than with lipgloss borders, because
+  the content box carries labels *inside* its top border: the tabs on the
+  left and the scroll position on the right, where neither costs a row of
+  the table it describes. A pending confirmation takes over the action box,
+  so the question sits where the answer is expected and swallows every key.
+- The action legend sheds its descriptions before it sheds an action:
+  knowing that `p` pauses beats knowing what pausing means, and a clipped
+  line tells neither.
+- Tab layout and tab hit-testing come from one function returning both the
+  bar and the spans, as the sidebar's do, so what the mouse believes and what
+  the screen shows cannot drift apart. Chips are built plain and measured
+  before being styled — an escape sequence counted as width would put every
+  hit one column out.
 - The table header is held **outside** the viewport and painted onto the
   box's first row, shifted by the viewport's own `XOffset`. Scrolling a long
   table must never cost the column names. Both panes scroll: the viewport
@@ -201,7 +314,17 @@ examples/          shipped example config, kept green by a test
 | Script is the only source form | One execution path; the config shows exactly what runs, shell choice included |
 | stdout is a JSON stream | Multi-source views without forcing the script to merge |
 | jq (gojq) as the only expression language | Users already know it; expressions are developed with real jq and pasted in |
-| Parameters as env vars, never templated (pending) | Splicing user input into script text is an injection hole |
+| Parameters as env vars, never templated | Splicing user input into script text is an injection hole |
+| Drill-down is an action, not its own feature | The old tool proved one mechanism carries both; a `drilldown:` schema would be un-built the first time someone wants to cordon a node |
+| Mutations require an explicit selection | Reverses the old "the filter is the selector"; `a` still selects everything the filter left, so nothing is lost but the accident |
+| Navigation follows the cursor row | Removes the old "select one pool first" refusal entirely |
+| An action runs once per row | Each call names one object: partial failure is reportable, and no selector can match something else |
+| A working action gets a tab, and shows its commands before running | Confirming blind is no confirmation; and the output has room to be read and scrolled instead of clipped |
+| Planning is separate from running in the engine | The command can only be shown up front if producing it executes nothing |
+| A step is shown as env + shell + script, not one quoted line | The values never enter the script text; a quoted one-liner would misrepresent what runs |
+| The engine appends the count to a confirmation | A confirmation that fails to say how much it touches cannot be written |
+| Config validated against the target view at load | The old `no such view` was a run-time surprise; so was an argument nothing read |
+| A required parameter hides a view from the menu | Running it bare would show an arbitrary object as if it were the answer; no `hidden:` flag needed |
 | Sort on raw values, before formatting | Rendered cells order neither numbers nor dates correctly |
 | Emphasis per column, on raw values | One value may mean different things in different columns |
 | Selection is a set of keys | Indices die on every reload; keys survive reordering |

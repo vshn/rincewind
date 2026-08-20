@@ -23,7 +23,31 @@ views:
     sort:
       - by: SYNC
         rank: [OutOfSync, Synced]
+    actions:
+      - key: enter                 # drill down: opens a view in a new tab
+        name: resources
+        open: argo.syncstatus
+        args: { app: .metadata.name }
 ```
+
+Actions come in two kinds, and both open a tab. `open:` navigates to another
+view, about the row under the cursor. `script:` does work — once per
+**selected** row, with values derived by jq reaching the script as
+environment variables, never templated into it.
+
+A working action opens its tab showing the exact invocations it is about to
+make, and asks underneath them:
+
+```
+pause  infra
+  name=infra
+  sh -c
+    kubectl patch machineconfigpool "$name" --type merge -p '…'
+  machineconfigpool/infra patched
+```
+
+So you confirm with the command in front of you, the output lands beside the
+call that produced it, and `esc` takes you back to the list untouched.
 
 ## Use
 
@@ -35,6 +59,9 @@ aldediggi check                  # validate the config without starting the TUI
 
 In the TUI: `⏎` runs the view under the cursor, `⇥` focuses the output,
 `/` filters, `space`/`a` select rows, `r` reloads, `q` quits.
+In the output pane the view's own action keys apply — the box under the
+table says which. Drilling down opens a tab: `]`/`[` switch, `esc` or `x` closes one,
+and coming back finds the filter, cursor and scroll exactly as they were.
 Both panes scroll: `↑↓`, `⇞`/`⇟` by the screenful, `home`/`end` to the ends,
 and `<` `>` sideways through wide tables — the column names stay put.
 

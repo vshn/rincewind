@@ -18,8 +18,9 @@ import (
 // expression values, before formatting: an RFC 3339 timestamp orders
 // chronologically as a string, a number orders numerically — the rendered
 // cell would order neither.
-func (cv *compiled) run(ctx context.Context) (Table, error) {
-	out, err := runScript(ctx, cv.shell, cv.def.Script)
+func (cv *compiled) run(ctx context.Context, args Args) (Table, error) {
+	env := cv.env(args)
+	out, err := runScript(ctx, cv.shell, cv.def.Script, env, nil)
 	if err != nil {
 		return Table{}, err
 	}
@@ -29,14 +30,14 @@ func (cv *compiled) run(ctx context.Context) (Table, error) {
 		return Table{}, err
 	}
 
-	raws, err := cv.extract(ctx, docs)
+	raws, err := cv.extract(ctx, docs, args)
 	if err != nil {
 		return Table{}, err
 	}
 
 	sort.SliceStable(raws, func(i, j int) bool { return cv.less(raws[i], raws[j]) })
 
-	return cv.render(ctx, raws, time.Now()), nil
+	return cv.render(ctx, raws, args, time.Now()), nil
 }
 
 // rawRow is a row between extraction and rendering: the source object, the
@@ -76,10 +77,10 @@ func near(out []byte, offset int64) string {
 
 // extract runs the rows expression over every stream value. A failure here is
 // fatal for the view: without rows there is nothing to salvage per cell.
-func (cv *compiled) extract(ctx context.Context, docs []any) ([]rawRow, error) {
+func (cv *compiled) extract(ctx context.Context, docs []any, args Args) ([]rawRow, error) {
 	var raws []rawRow
 	for _, doc := range docs {
-		iter := cv.rows.RunWithContext(ctx, doc)
+		iter := cv.rows.RunWithContext(ctx, doc, argsValue(args))
 		for {
 			v, ok := iter.Next()
 			if !ok {
@@ -90,7 +91,7 @@ func (cv *compiled) extract(ctx context.Context, docs []any) ([]rawRow, error) {
 			}
 			row := rawRow{src: v, vals: make([]any, len(cv.cols)), bad: make([]error, len(cv.cols))}
 			for i, col := range cv.cols {
-				row.vals[i], row.bad[i] = firstValue(ctx, col.code, v)
+				row.vals[i], row.bad[i] = firstValue(ctx, col.code, v, args)
 			}
 			raws = append(raws, row)
 		}
@@ -101,7 +102,7 @@ func (cv *compiled) extract(ctx context.Context, docs []any) ([]rawRow, error) {
 // render shapes the sorted raw rows into cells. Emphasis is matched against
 // the raw value, before formatting, so a rule targets the data rather than
 // however the cell happens to be displayed.
-func (cv *compiled) render(ctx context.Context, raws []rawRow, now time.Time) Table {
+func (cv *compiled) render(ctx context.Context, raws []rawRow, args Args, now time.Time) Table {
 	t := Table{Cols: make([]string, len(cv.cols))}
 	for i, col := range cv.cols {
 		t.Cols[i] = col.def.Name
@@ -128,7 +129,7 @@ func (cv *compiled) render(ctx context.Context, raws []rawRow, now time.Time) Ta
 				Emph: col.def.Emph[text],
 			}
 		}
-		row.Key = cv.keyOf(ctx, raw.src, row.Cells)
+		row.Key = cv.keyOf(ctx, raw.src, row.Cells, args)
 		t.Rows = append(t.Rows, row)
 	}
 	return t
@@ -137,9 +138,9 @@ func (cv *compiled) render(ctx context.Context, raws []rawRow, now time.Time) Ta
 // keyOf names a row for selection purposes. Without a key expression the
 // cells have to do, which means a selection may not survive a reload that
 // changes what is displayed.
-func (cv *compiled) keyOf(ctx context.Context, src any, cells []Cell) string {
+func (cv *compiled) keyOf(ctx context.Context, src any, cells []Cell, args Args) string {
 	if cv.key != nil {
-		if v, err := firstValue(ctx, cv.key, src); err == nil {
+		if v, err := firstValue(ctx, cv.key, src, args); err == nil {
 			return valueText(v)
 		}
 	}

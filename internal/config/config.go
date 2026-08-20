@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -28,16 +29,40 @@ type view struct {
 	Title   string   `yaml:"title"`
 	Class   string   `yaml:"class"`
 	Refresh string   `yaml:"refresh"`
+	Params  []param  `yaml:"params"`
 	Source  source   `yaml:"source"`
 	Rows    string   `yaml:"rows"`
 	Key     string   `yaml:"key"`
 	Columns []column `yaml:"columns"`
 	Sort    []sortBy `yaml:"sort"`
+	Actions []action `yaml:"actions"`
 }
 
 type source struct {
 	Shell  []string `yaml:"shell"`
 	Script string   `yaml:"script"`
+}
+
+type param struct {
+	Name     string `yaml:"name"`
+	Short    string `yaml:"short"`
+	Default  string `yaml:"default"`
+	Required bool   `yaml:"required"`
+}
+
+type action struct {
+	Key   string `yaml:"key"`
+	Name  string `yaml:"name"`
+	Short string `yaml:"short"`
+
+	Open string            `yaml:"open"`
+	Args map[string]string `yaml:"args"`
+
+	Shell   []string          `yaml:"shell"`
+	Script  string            `yaml:"script"`
+	Env     map[string]string `yaml:"env"`
+	Confirm string            `yaml:"confirm"`
+	Reload  bool              `yaml:"reload"`
 }
 
 type column struct {
@@ -100,7 +125,30 @@ func Parse(r io.Reader) ([]engine.View, error) {
 		}
 		views = append(views, compiled)
 	}
+
+	// Navigating actions are resolved once every view exists, so an action
+	// may open one declared further down the file — and an unknown target
+	// dies here rather than as a surprise at run time.
+	if err := engine.Link(views); err != nil {
+		return nil, err
+	}
 	return views, nil
+}
+
+// envName is what a parameter may be called. Lowercase only, which keeps
+// them clear of PATH, HOME, IFS and every other conventional variable
+// without needing a list of forbidden names.
+var envName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// reserved are the keys the TUI answers itself. An action claiming one would
+// take navigation or quitting away from the user, so config may not.
+var reserved = map[string]bool{
+	"q": true, "ctrl+c": true, "/": true, "tab": true, "shift+tab": true,
+	"esc": true, "up": true, "down": true, "k": true, "j": true,
+	"pgup": true, "pgdown": true, "ctrl+f": true, "ctrl+b": true,
+	"home": true, "end": true, "g": true, "G": true,
+	"r": true, "space": true, " ": true, "a": true, "m": true,
+	"[": true, "]": true, "x": true, "<": true, ">": true,
 }
 
 // toDef checks everything the schema can express and hands the rest —
@@ -146,6 +194,20 @@ func toDef(v view) (engine.Def, error) {
 		d.Refresh = refresh
 	}
 
+	seen := map[string]bool{}
+	for _, p := range v.Params {
+		if !envName.MatchString(p.Name) {
+			return fail("param %q: a name must be lowercase letters, digits and underscores, so it cannot shadow PATH or HOME", p.Name)
+		}
+		if seen[p.Name] {
+			return fail("param %s: declared twice", p.Name)
+		}
+		seen[p.Name] = true
+		d.Params = append(d.Params, engine.Param{
+			Name: p.Name, Short: p.Short, Default: p.Default, Required: p.Required,
+		})
+	}
+
 	names := map[string]bool{}
 	for _, c := range v.Columns {
 		if c.Name == "" {
@@ -183,6 +245,54 @@ func toDef(v view) (engine.Def, error) {
 			return fail("sort by %s: order %q is not asc or desc", s.By, s.Order)
 		}
 		d.Sort = append(d.Sort, key)
+	}
+
+	keys, actNames := map[string]bool{}, map[string]bool{}
+	for _, a := range v.Actions {
+		if a.Name == "" {
+			return fail("an action has no name")
+		}
+		if actNames[a.Name] {
+			return fail("action %s: declared twice", a.Name)
+		}
+		actNames[a.Name] = true
+
+		switch {
+		case a.Key == "":
+			return fail("action %s: has no key", a.Name)
+		case reserved[a.Key]:
+			return fail("action %s: key %q is one the tool answers itself", a.Name, a.Key)
+		case keys[a.Key]:
+			return fail("action %s: key %q is already taken", a.Name, a.Key)
+		}
+		keys[a.Key] = true
+
+		// The two kinds are exclusive; mixing their fields is a mistake
+		// worth naming rather than quietly ignoring half of it.
+		if a.Open != "" {
+			switch {
+			case len(a.Env) > 0:
+				return fail("action %s: env belongs to a script, not to open", a.Name)
+			case a.Confirm != "":
+				return fail("action %s: confirm belongs to a script, not to open", a.Name)
+			case a.Reload:
+				return fail("action %s: reload belongs to a script, not to open", a.Name)
+			}
+		} else if len(a.Args) > 0 {
+			return fail("action %s: args belong to open, not to a script", a.Name)
+		}
+		for name := range a.Env {
+			if !envName.MatchString(name) {
+				return fail("action %s: env %q: a name must be lowercase letters, digits and underscores", a.Name, name)
+			}
+		}
+
+		d.Actions = append(d.Actions, engine.ActionDef{
+			Key: a.Key, Name: a.Name, Short: a.Short,
+			Open: a.Open, Args: a.Args,
+			Shell: a.Shell, Script: a.Script, Env: a.Env,
+			Confirm: a.Confirm, Reload: a.Reload,
+		})
 	}
 
 	return d, nil

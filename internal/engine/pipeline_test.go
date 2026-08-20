@@ -15,7 +15,7 @@ func runDef(t *testing.T, d Def) Table {
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	res, err := v.Run(context.Background())
+	res, err := v.Run(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestScriptFailureCarriesStderr(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = v.Run(context.Background())
+	_, err = v.Run(context.Background(), nil)
 	if err == nil || !strings.Contains(err.Error(), "the disk is on fire") {
 		t.Fatalf("error %v does not carry stderr", err)
 	}
@@ -75,7 +75,7 @@ func TestBrokenOutputNamesTheSpot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = v.Run(context.Background())
+	_, err = v.Run(context.Background(), nil)
 	if err == nil || !strings.Contains(err.Error(), "JSON stream") {
 		t.Fatalf("error %v does not explain the contract", err)
 	}
@@ -277,7 +277,7 @@ func TestCancelledContextWinsOverExitStatus(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	_, err = v.Run(ctx)
+	_, err = v.Run(ctx, nil)
 	if err != context.DeadlineExceeded {
 		t.Fatalf("got %v, want context.DeadlineExceeded", err)
 	}

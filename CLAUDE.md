@@ -7,10 +7,11 @@ with jq expressions (gojq).
 This replaces the earlier builtin-views design; the reasoning for the
 reversal is recorded in docs/architecture.md.
 
-**Status:** config loader, engine pipeline and the table view with
-row selection are built. TUI only.
-Not built yet: actions, view parameters, CLI output mode,
-stream views (follow logs), other view classes.
+**Status:** config loader, engine pipeline, the table view with row
+selection, view parameters and actions — both kinds — are built. Drill-down
+is an action that navigates; targets open as tabs. TUI only.
+Not built yet: action parameters (prompting for a value), batched actions,
+CLI output mode, stream views (follow logs), other view classes.
 
 ## Docs
 
@@ -20,9 +21,17 @@ pipeline, stdout contract, config schema, error philosophy, decisions table.
 ## Vocabulary
 
 A **view** is one entry in the config file: source script, `rows`/column
-jq expressions, sort, emphasis. The **selection** is TUI widget state, a set
-of row keys, independent of actions (which do not exist yet). When actions
-arrive: their input is the selection if any, else all filtered rows.
+jq expressions, sort, emphasis, parameters, actions.
+
+An **action** does something with the rows a view is showing. One mechanism,
+two kinds: `open:` navigates to another view (this is drill-down) and acts on
+the **cursor row**; `script:` works, once per row, and acts on the
+**selection**, refusing when there is none. Drill-down is not a separate
+feature — do not add one.
+
+A **tab** holds either a view — with its own result, filter, selection,
+cursor and scroll position — or a **job**: a working action's commands and
+their output. Both kinds of action open a tab; `esc` closes it.
 
 ## Invariants
 
@@ -35,6 +44,23 @@ arrive: their input is the selection if any, else all filtered rows.
   Script failures surface the script's stderr.
 - **Sort and emphasis work on raw jq values**, before formatting.
 - **Selection is keyed by `key`**, pruned against each new result.
+- **A mutation acts on the selection and refuses without one.** The filter is
+  no longer the selector; `a` selects what it left. Do not "helpfully" fall
+  back to the filtered set.
+- **The engine appends the row count to every confirmation**, so config
+  cannot write one that hides how much it touches.
+- **An action runs once per row**, each call naming one object.
+- **The command is on screen before it runs.** `Plan` produces steps without
+  executing anything; only `Step.Run` executes. Never collapse the two, and
+  never render a step as one shell-quoted line — the values travel beside
+  the script, not inside it.
+- **Everything a config can get wrong dies in `internal/config` at load
+  time**, naming view and action — including an `open` target that does not
+  exist and an argument the target does not declare.
+- **Each tab owns its state**; `m.cur()` is the tab on screen, `m.selected()`
+  the sidebar's cursor. They are not the same view after a drill-down.
+- **Messages find their tab by `seq`**, a counter that never reuses a number.
+  One rule covers a superseded run, a closed tab and a background tick.
 - **`Run` returns a `Table`, never a formatted string.**
 - **No escape codes in cells; style through `render.Style`** after layout.
   Everything that measures naively (tabwriter, bubbles/table) counts them
@@ -64,10 +90,13 @@ charm.land/bubbletea/v2   charm.land/bubbles/v2   charm.land/lipgloss/v2
 cmd/          cobra wiring: root (TUI), check, --config flag
 internal/
   config/     YAML → typed defs, schema validation → engine.Def
-  engine/     Compile(Def) → View; script runner, stream decode, gojq,
-              sort, formats; Table/Row/Cell
+  engine/     Compile(Def) → View, Link resolves navigating actions;
+              script runner, stream decode, gojq, sort, formats;
+              Table/Row/Cell, Args/Param/Action
   render/     Table → styled lines
-  tui/        bubbletea model: sidebar, table pane, filter, selection
+  tui/        model.go   bubbletea model, tabs, keys, mouse
+              action.go  firing actions, confirmation, drill
+              frame.go   framed boxes, tab bar, action bar
 examples/     example config; kept green by internal/config/example_test.go
 docs/
 ```

@@ -75,10 +75,19 @@ views:
   # keeps working on clusters without the MachineConfig operator.
   - id: nodes.status
     title: Kubelet, scheduling and machine-config rollout
+    # Optional: empty lists every node, set it lists one pool's. The value
+    # reaches the script as $selector, never templated into it, so a label
+    # taken from cluster data cannot become shell code.
+    params:
+      - name: selector
+        short: label selector, as kubectl -l takes it
     source:
       script: |
         d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
-        kubectl get nodes -o json > "$d/nodes.json"
+        # Use `if ... fi`, not `[ -n "$x" ] && ...`: the && form leaves exit
+        # status 1 when the parameter is empty, which reads as a failure.
+        if [ -n "$selector" ]; then set -- -l "$selector"; fi
+        kubectl get nodes "$@" -o json > "$d/nodes.json"
         kubectl get machineconfigpools -o json > "$d/pools.json" 2>/dev/null \
           || echo '{"items":[]}' > "$d/pools.json"
         jq -s '
@@ -163,3 +172,81 @@ views:
       - by: SINCE
         order: desc
       - by: NAME
+
+  # MachineConfigPools, and the drill-down into the nodes one covers. This is
+  # what actions are for: `open` navigates, `script` works, and both derive
+  # what they need from the row with jq.
+  - id: nodes.pools
+    title: MachineConfigPools and their rollout
+    source:
+      script: kubectl get machineconfigpools -o json
+    rows: .items[]
+    key: .metadata.name
+    columns:
+      - name: NAME
+        expr: .metadata.name
+      - name: PAUSED
+        expr: if .spec.paused then "paused" else "" end
+        emphasis: { paused: warn }
+      - name: STATE
+        expr: >-
+          [.status.conditions[]? | select(.status == "True") | .type] as $on
+          | if ($on | index("Degraded")) then "Degraded"
+            elif ($on | index("Updating")) then "Updating"
+            elif ($on | index("Updated")) then "Updated"
+            else "Unknown" end
+        emphasis: { Degraded: bad, Updating: warn, Updated: good, Unknown: warn }
+      - name: READY
+        expr: '"\(.status.readyMachineCount // 0)/\(.status.machineCount // 0)"'
+      - name: TARGET
+        expr: .status.configuration.name // ""
+      - name: MESSAGE
+        expr: >-
+          [.status.conditions[]? | select(.type == "Degraded" and .status == "True")][0].message // ""
+    sort:
+      - by: STATE
+        rank: [Degraded, Updating, Updated]
+      - by: NAME
+    actions:
+      # Navigate: the chain one actually walks — the pool is stuck, which
+      # node is holding it up. Acts on the row under the cursor.
+      - key: enter
+        name: nodes
+        short: Show the nodes in this pool
+        open: nodes.status
+        args:
+          # Rendering only the matchLabels half of a selector that also has
+          # matchExpressions would list the wrong nodes, which is worse than
+          # saying no. The refusal travels as the tab's error.
+          selector: >-
+            if ((.spec.nodeSelector.matchExpressions // []) | length) > 0
+            then error("pool \(.metadata.name) selects nodes by expression, which this view cannot render; use kubectl")
+            elif ((.spec.nodeSelector.matchLabels // {}) | length) == 0
+            then error("pool \(.metadata.name) has no node selector")
+            else (.spec.nodeSelector.matchLabels | to_entries | sort_by(.key)
+                  | map("\(.key)=\(.value)") | join(","))
+            end
+
+      # Work: runs once per selected row. Select with ␣ or a first — a
+      # mutation never acts on merely what the filter left.
+      - key: p
+        name: pause
+        short: Pause the rollout
+        confirm: '"Pause the rollout of \(map(.metadata.name) | join(", "))"'
+        env:
+          name: .metadata.name
+        script: |
+          kubectl patch machineconfigpool "$name" --type merge \
+            -p '{"spec":{"paused":true}}'
+        reload: true
+
+      - key: P
+        name: resume
+        short: Resume the rollout
+        confirm: '"Resume the rollout of \(map(.metadata.name) | join(", "))"'
+        env:
+          name: .metadata.name
+        script: |
+          kubectl patch machineconfigpool "$name" --type merge \
+            -p '{"spec":{"paused":false}}'
+        reload: true

@@ -149,7 +149,7 @@ func TestParsedViewRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := views[0].Run(t.Context())
+	res, err := views[0].Run(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

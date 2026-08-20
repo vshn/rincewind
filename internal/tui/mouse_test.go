@@ -76,8 +76,8 @@ func TestClickPutsTheCursorOnTheRowUnderIt(t *testing.T) {
 	if m.focus != paneOutput {
 		t.Error("clicking a row did not focus the output")
 	}
-	if m.row != 2 {
-		t.Errorf("cursor on row %d, want row 2 (worker-03)", m.row)
+	if m.cur().row != 2 {
+		t.Errorf("cursor on row %d, want row 2 (worker-03)", m.cur().row)
 	}
 }
 
@@ -91,15 +91,15 @@ func TestClickHitsTheRightRowAfterScrolling(t *testing.T) {
 
 	m.Update(click(overContent, lineOf(t, m, "worker-20")))
 
-	if m.row != 19 {
-		t.Errorf("cursor on row %d, want row 19 (worker-20)", m.row)
+	if m.cur().row != 19 {
+		t.Errorf("cursor on row %d, want row 19 (worker-20)", m.cur().row)
 	}
 }
 
 func TestClickOnTheHeaderOrFrameDoesNothing(t *testing.T) {
 	m := scrolling(t)
 	m.Update(key("tab"))
-	before := m.row
+	before := m.cur().row
 
 	for _, y := range []int{
 		0,                      // the title box
@@ -108,8 +108,8 @@ func TestClickOnTheHeaderOrFrameDoesNothing(t *testing.T) {
 		m.bodyBoxHeight() + 10, // the footer
 	} {
 		m.Update(click(overContent, y))
-		if m.row != before {
-			t.Fatalf("a click on line %d moved the cursor to %d", y, m.row)
+		if m.cur().row != before {
+			t.Fatalf("a click on line %d moved the cursor to %d", y, m.cur().row)
 		}
 	}
 }
@@ -125,7 +125,7 @@ func TestClickOnAMenuEntryRunsIt(t *testing.T) {
 	if m.cursor != 4 {
 		t.Fatalf("cursor on entry %d, want 4 (view04)", m.cursor)
 	}
-	if !m.running {
+	if !m.cur().running {
 		t.Error("clicking a menu entry did not run it")
 	}
 }

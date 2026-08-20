@@ -1,0 +1,194 @@
+package engine
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"sort"
+
+	"github.com/itchyny/gojq"
+)
+
+// compileActions turns a view's declared actions into runnable ones. A
+// navigating action's target cannot be resolved here — the other views may
+// not exist yet — so Open is left nil and filled in by a second pass; see
+// Link.
+func compileActions(d Def) ([]Action, error) {
+	var out []Action
+	for _, a := range d.Actions {
+		act := Action{Key: a.Key, Name: a.Name, Short: a.Short, Reload: a.Reload}
+		where := "action " + a.Name
+
+		switch {
+		case a.Open != "" && a.Script != "":
+			return nil, fmt.Errorf("view %q: %s: has both open and script; an action either navigates or works", d.ID, where)
+		case a.Open == "" && a.Script == "":
+			return nil, fmt.Errorf("view %q: %s: needs either open or script", d.ID, where)
+
+		case a.Open != "":
+			args, err := compileArgs(d.ID, where, a.Args)
+			if err != nil {
+				return nil, err
+			}
+			act.Args, act.openID = args, a.Open
+			for name := range a.Args {
+				act.argNames = append(act.argNames, name)
+			}
+			sort.Strings(act.argNames) // stable error messages
+
+		default:
+			plan, err := compilePlan(d, a, where)
+			if err != nil {
+				return nil, err
+			}
+			act.Plan = plan
+
+			if a.Confirm != "" {
+				code, err := compileExpr(d.ID, where+" confirm", a.Confirm)
+				if err != nil {
+					return nil, err
+				}
+				act.Confirm = func(rows []any, cur Args) (string, error) {
+					v, err := firstValue(context.Background(), code, rows, cur)
+					if err != nil {
+						return "", err
+					}
+					return valueText(v), nil
+				}
+			}
+		}
+		out = append(out, act)
+	}
+	return out, nil
+}
+
+// compileArgs builds the evaluator for a navigating action's parameters.
+func compileArgs(view, where string, exprs map[string]string) (func(any, Args) (Args, error), error) {
+	codes := map[string]*gojq.Code{}
+	for name, src := range exprs {
+		code, err := compileExpr(view, where+" args."+name, src)
+		if err != nil {
+			return nil, err
+		}
+		codes[name] = code
+	}
+
+	return func(src any, cur Args) (Args, error) {
+		out := Args{}
+		for name, code := range codes {
+			v, err := firstValue(context.Background(), code, src, cur)
+			if err != nil {
+				// A refusal written into the expression — a pool selecting by
+				// expression, say — arrives here. It is the answer, not a
+				// malfunction, so it travels as it was written.
+				return nil, fmt.Errorf("%s: %v", name, err)
+			}
+			out[name] = valueText(v)
+		}
+		return out, nil
+	}, nil
+}
+
+// compilePlan builds the planner for a working action: one step per row, so
+// each invocation names exactly one object. Planning is separate from
+// running because the tool shows what it is about to do before it does it.
+func compilePlan(d Def, a ActionDef, where string) (func([]any, Args) ([]Step, error), error) {
+	shell := a.Shell
+	if len(shell) == 0 {
+		shell = []string{"sh", "-c"}
+	}
+
+	codes := map[string]*gojq.Code{}
+	for name, src := range a.Env {
+		code, err := compileExpr(d.ID, where+" env."+name, src)
+		if err != nil {
+			return nil, err
+		}
+		codes[name] = code
+	}
+
+	return func(rows []any, cur Args) ([]Step, error) {
+		steps := make([]Step, 0, len(rows))
+		for _, row := range rows {
+			env := Args{}
+			for name, value := range cur {
+				env[name] = value
+			}
+			for name, code := range codes {
+				// Planning must not run anything, so a failing expression is
+				// refused here rather than half-executing the set.
+				v, err := firstValue(context.Background(), code, row, cur)
+				if err != nil {
+					return nil, fmt.Errorf("env %s: %v", name, err)
+				}
+				env[name] = valueText(v)
+			}
+
+			// The row itself goes to stdin, so a script needing more than the
+			// few values named in env can read the whole object.
+			stdin, err := json.Marshal(row)
+			if err != nil {
+				return nil, err
+			}
+			steps = append(steps, Step{Env: env, Shell: shell, Script: a.Script, Stdin: stdin})
+		}
+		return steps, nil
+	}, nil
+}
+
+// Link resolves navigating actions against the finished set of views. It is
+// a second pass because an action may open a view declared further down the
+// file, and it is where an unknown target dies — at load time, naming the
+// action, rather than as a runtime "no such view".
+func Link(views []View) error {
+	byID := map[string]*View{}
+	for i := range views {
+		byID[views[i].ID] = &views[i]
+	}
+
+	for i := range views {
+		v := &views[i]
+		for j := range v.Actions {
+			a := &v.Actions[j]
+			if a.openID == "" {
+				continue
+			}
+			to, ok := byID[a.openID]
+			if !ok {
+				return fmt.Errorf("view %q: action %s: opens %q, which is not a view", v.ID, a.Name, a.openID)
+			}
+			if err := checkArgs(v.ID, *a, to); err != nil {
+				return err
+			}
+			a.Open = to
+		}
+	}
+	return nil
+}
+
+// checkArgs holds an action to the parameters its target declares. Getting
+// this wrong used to be a run-time surprise — an argument nothing read, or a
+// required one silently empty; here it is a load-time error naming both ends.
+func checkArgs(from string, a Action, to *View) error {
+	declared := map[string]Param{}
+	for _, p := range to.Params {
+		declared[p.Name] = p
+	}
+
+	for _, name := range a.argNames {
+		if _, ok := declared[name]; !ok {
+			return fmt.Errorf("view %q: action %s: passes %q, which view %q does not declare as a parameter", from, a.Name, name, to.ID)
+		}
+	}
+
+	given := map[string]bool{}
+	for _, name := range a.argNames {
+		given[name] = true
+	}
+	for _, p := range to.Params {
+		if p.Required && !given[p.Name] && p.Default == "" {
+			return fmt.Errorf("view %q: action %s: view %q requires %q, which this action does not pass", from, a.Name, to.ID, p.Name)
+		}
+	}
+	return nil
+}

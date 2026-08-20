@@ -16,7 +16,7 @@ func TestExampleConfigWorks(t *testing.T) {
 		if v.ID != "demo.services" {
 			continue
 		}
-		res, err := v.Run(t.Context())
+		res, err := v.Run(t.Context(), nil)
 		if err != nil {
 			t.Fatal(err)
 		}

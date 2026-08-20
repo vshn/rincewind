@@ -38,6 +38,19 @@ func body(m *model) []string {
 	return out
 }
 
+// sidebar returns the menu column alone. Worth isolating: a view's name also
+// appears in the tab bar, so searching the whole screen proves nothing about
+// the menu.
+func sidebar(m *model) string {
+	var out []string
+	for _, line := range strings.Split(m.View().Content, "\n") {
+		if plain := visibleOnly(line); strings.Contains(plain, "││") {
+			out = append(out, strings.SplitN(plain, "││", 2)[0])
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
 func TestCursorPastTheBottomScrolls(t *testing.T) {
 	m := scrolling(t)
 	first := body(m)[1]
@@ -89,13 +102,13 @@ func TestPageMovesAScreenful(t *testing.T) {
 	page := m.vp.Height()
 
 	m.Update(key("pgdown"))
-	if m.row != page {
-		t.Errorf("cursor at row %d after a page, want %d", m.row, page)
+	if m.cur().row != page {
+		t.Errorf("cursor at row %d after a page, want %d", m.cur().row, page)
 	}
 
 	m.Update(key("pgup"))
-	if m.row != 0 {
-		t.Errorf("cursor at row %d after paging back, want 0", m.row)
+	if m.cur().row != 0 {
+		t.Errorf("cursor at row %d after paging back, want 0", m.cur().row)
 	}
 }
 
@@ -103,16 +116,16 @@ func TestJumpToEndsOfTable(t *testing.T) {
 	m := scrolling(t)
 
 	m.Update(key("end"))
-	if m.row != 39 {
-		t.Errorf("cursor at row %d after end, want 39", m.row)
+	if m.cur().row != 39 {
+		t.Errorf("cursor at row %d after end, want 39", m.cur().row)
 	}
 	if !strings.Contains(m.View().Content, "worker-40") {
 		t.Error("the last row is not on screen after end")
 	}
 
 	m.Update(key("home"))
-	if m.row != 0 {
-		t.Errorf("cursor at row %d after home, want 0", m.row)
+	if m.cur().row != 0 {
+		t.Errorf("cursor at row %d after home, want 0", m.cur().row)
 	}
 }
 
@@ -139,11 +152,11 @@ func TestSidebarScrollsWithTheCursor(t *testing.T) {
 		m.Update(key("down"))
 	}
 
-	content := m.View().Content
-	if !strings.Contains(content, "view26") {
+	menu := sidebar(m)
+	if !strings.Contains(menu, "view26") {
 		t.Error("the sidebar cursor scrolled out of sight")
 	}
-	if strings.Contains(content, "view01") {
+	if strings.Contains(menu, "view01") {
 		t.Error("the sidebar did not scroll at all")
 	}
 }

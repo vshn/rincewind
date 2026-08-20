@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -11,12 +12,26 @@ import (
 // runScript executes shell + script and returns its stdout. stderr is kept
 // apart and becomes the error text on failure: the script's own message is
 // the useful one, the exit status is not.
-func runScript(ctx context.Context, shell []string, script string) ([]byte, error) {
+//
+// env reaches the script as environment variables and stdin as its input.
+// Neither is ever templated into the script text, so a value taken from
+// cluster data or from the user cannot become code.
+func runScript(ctx context.Context, shell []string, script string, env Args, stdin []byte) ([]byte, error) {
 	argv := append(append([]string{}, shell...), script)
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+
+	if len(env) > 0 {
+		cmd.Env = os.Environ()
+		for name, value := range env {
+			cmd.Env = append(cmd.Env, name+"="+value)
+		}
+	}
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 
 	err := cmd.Run()
 	// The context ending is the caller's decision or deadline, not the

@@ -9,7 +9,7 @@ import (
 
 func selectedKeys(m *model) []string {
 	var out []string
-	for k := range m.selection {
+	for k := range m.cur().selection {
 		out = append(out, k)
 	}
 	return out
@@ -20,17 +20,17 @@ func TestSpaceTogglesRowAndMovesOn(t *testing.T) {
 	m.Update(key("tab")) // focus the output pane
 
 	m.Update(key("space"))
-	if !m.selection["worker-01"] {
+	if !m.cur().selection["worker-01"] {
 		t.Fatalf("selected %v, want worker-01", selectedKeys(m))
 	}
-	if m.row != 1 {
-		t.Fatalf("cursor at %d after space, want 1", m.row)
+	if m.cur().row != 1 {
+		t.Fatalf("cursor at %d after space, want 1", m.cur().row)
 	}
 
 	// A second space on the same row deselects.
 	m.Update(key("up"))
 	m.Update(key("space"))
-	if len(m.selection) != 0 {
+	if len(m.cur().selection) != 0 {
 		t.Fatalf("selected %v, want none", selectedKeys(m))
 	}
 }
@@ -50,7 +50,7 @@ func TestSpaceNeedsTheOutputPane(t *testing.T) {
 	m := loaded(t)
 
 	m.Update(key("space"))
-	if len(m.selection) != 0 {
+	if len(m.cur().selection) != 0 {
 		t.Fatalf("space selected %v from the sidebar", selectedKeys(m))
 	}
 }
@@ -65,13 +65,13 @@ func TestAToggleAllRespectsTheFilter(t *testing.T) {
 	m.Update(key("enter"))
 
 	m.Update(key("a"))
-	if len(m.selection) != 2 || !m.selection["worker-01"] || !m.selection["worker-02"] {
+	if len(m.cur().selection) != 2 || !m.cur().selection["worker-01"] || !m.cur().selection["worker-02"] {
 		t.Fatalf("selected %v, want the two workers", selectedKeys(m))
 	}
 
 	// All visible rows are selected, so a again clears them.
 	m.Update(key("a"))
-	if len(m.selection) != 0 {
+	if len(m.cur().selection) != 0 {
 		t.Fatalf("selected %v after second a, want none", selectedKeys(m))
 	}
 }
@@ -88,7 +88,7 @@ func TestSelectionSurvivesAReloadThatReorders(t *testing.T) {
 	}
 	m.Update(resultMsg{seq: m.seq, res: reordered})
 
-	if !m.selection["worker-01"] {
+	if !m.cur().selection["worker-01"] {
 		t.Fatalf("selected %v after reload, want worker-01", selectedKeys(m))
 	}
 }
@@ -102,7 +102,7 @@ func TestSelectionIsPrunedWhenRowsVanish(t *testing.T) {
 	shrunk := engine.Table{Cols: nodesTable().Cols, Rows: nodesTable().Rows[1:]}
 	m.Update(resultMsg{seq: m.seq, res: shrunk})
 
-	if len(m.selection) != 0 {
+	if len(m.cur().selection) != 0 {
 		t.Fatalf("selection %v survived rows that are gone", selectedKeys(m))
 	}
 }
@@ -113,7 +113,7 @@ func TestEscClearsSelectionBeforeUnfocusing(t *testing.T) {
 	m.Update(key("space"))
 
 	m.Update(key("esc"))
-	if len(m.selection) != 0 {
+	if len(m.cur().selection) != 0 {
 		t.Fatal("esc did not clear the selection")
 	}
 	if m.focus != paneOutput {
@@ -135,7 +135,7 @@ func TestOpeningAViewDropsTheSelection(t *testing.T) {
 	m.Update(key("up"))  // demo/quick
 	m.Update(key("enter"))
 
-	if len(m.selection) != 0 {
+	if len(m.cur().selection) != 0 {
 		t.Fatalf("selection %v leaked into another view", selectedKeys(m))
 	}
 }
