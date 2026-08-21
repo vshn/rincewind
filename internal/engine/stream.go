@@ -7,12 +7,22 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // maxLine is how long a single line may be before the reader gives up on it.
 // bufio's own default is 64 KiB, which a JSON-logging controller can exceed
 // on one line; a megabyte is past anything worth reading in a terminal.
 const maxLine = 1 << 20
+
+// pipeGrace is how long Wait may sit on the stdio pipes after the script
+// exited or was killed. It exists for the orphans: `sh -c 'a | b'` forks a
+// and b, so killing sh leaves them alive with the pipes open, and without a
+// bound Wait would wait on the pipe copies for as long as they live —
+// which on a followed view is a goroutine parked forever, and in CI was a
+// ten-minute test timeout. Closing the pipes also hands a still-writing
+// orphan an EPIPE, which is what finally reaps it.
+const pipeGrace = 2 * time.Second
 
 // Chunk is what a stream delivers: lines as they arrive, and — as the last
 // thing before the channel closes — how it ended. Err is nil when the script
@@ -32,6 +42,9 @@ func stream(ctx context.Context, shell []string, script string, env Args) (<-cha
 	argv := append(append([]string{}, shell...), script)
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	// See pipeGrace: without it, an orphaned pipeline member keeps stderr
+	// open and every Wait below sits on it forever.
+	cmd.WaitDelay = pipeGrace
 	if len(env) > 0 {
 		cmd.Env = os.Environ()
 		for name, value := range env {
