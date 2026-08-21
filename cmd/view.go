@@ -13,6 +13,9 @@ import (
 	"github.com/vshn/rincewind/internal/render"
 )
 
+// viewParams are the -p pairs this command was given.
+var viewParams []string
+
 var viewCmd = &cobra.Command{
 	Use:   "view <id>",
 	Short: "Run one view and print its output",
@@ -21,9 +24,10 @@ var viewCmd = &cobra.Command{
 		"view streams until its script ends or it is interrupted. Colour is used\n" +
 		"only when the output is a terminal, so piping into a file gives plain\n" +
 		"text.\n\n" +
-		"Views are run as they stand: there is no way to pass a parameter yet, so\n" +
-		"one that requires an argument is refused rather than run on a value it\n" +
-		"made up.",
+		"A view that declares parameters takes them as -p name=value, the way an\n" +
+		"action in the TUI supplies them. They reach the script as environment\n" +
+		"variables. Nothing is asked for here — this command prints and exits, so\n" +
+		"a required parameter without a value is refused by name.",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: completeViews,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -35,52 +39,50 @@ var viewCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		v, err := pick(views, args[0], path)
+		v, err := find(views, args[0], path)
 		if err != nil {
 			return err
 		}
-		return runView(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), v)
+
+		args2, err := parseParams(viewParams)
+		if err != nil {
+			return err
+		}
+		if err := checkDeclared(args2, v.Params, fmt.Sprintf("view %q", v.ID)); err != nil {
+			return err
+		}
+		// Nothing is prompted for: this command's output is meant to be piped,
+		// and a question on the way there is a hang.
+		if want := missing(args2, v.Params); len(want) > 0 {
+			return fmt.Errorf("view %q needs %s\n\npass it with -p name=value\n\nit declares:\n%s",
+				v.ID, strings.Join(want, ", "), paramListing(v.Params))
+		}
+		return runView(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), v, args2)
 	},
 }
 
-// pick finds the view by id and refuses the ones this mode cannot run. Both
-// refusals name what would work instead: a list of ids is the answer to
-// either mistake.
-func pick(views []engine.View, id, from string) (engine.View, error) {
+// find locates the view by id, naming what else there is when it is not
+// there. Every view can be reached now that -p exists, so the listing no
+// longer hides the ones that take parameters — it marks them instead.
+func find(views []engine.View, id, from string) (engine.View, error) {
 	for _, v := range views {
-		if v.ID != id {
-			continue
-		}
-		if !v.Listed() {
-			return engine.View{}, fmt.Errorf(
-				"view %q needs %s, and `view` has no way to pass one yet\n\nviews that run without arguments:\n%s",
-				id, needed(v), listing(views))
-		}
-		return v, nil
-	}
-	return engine.View{}, fmt.Errorf("no view %q in %s\n\nviews that run without arguments:\n%s",
-		id, from, listing(views))
-}
-
-// needed names the required parameters, so the refusal says what is missing
-// rather than only that something is.
-func needed(v engine.View) string {
-	var names []string
-	for _, p := range v.Params {
-		if p.Required {
-			names = append(names, p.Name)
+		if v.ID == id {
+			return v, nil
 		}
 	}
-	return strings.Join(names, ", ")
+	return engine.View{}, fmt.Errorf("no view %q in %s\n\nviews:\n%s", id, from, listing(views))
 }
 
-// listing is the ids one can actually ask for, indented for a message.
+// listing is the ids one can ask for, indented for a message, each with what
+// it insists on being given.
 func listing(views []engine.View) string {
 	var out []string
 	for _, v := range views {
-		if v.Listed() {
-			out = append(out, "  "+v.ID)
+		line := "  " + v.ID
+		if want := required(v); want != "" {
+			line += "  (needs " + want + ")"
 		}
+		out = append(out, line)
 	}
 	if len(out) == 0 {
 		return "  (none)"
@@ -88,15 +90,27 @@ func listing(views []engine.View) string {
 	return strings.Join(out, "\n")
 }
 
+// required names a view's required parameters, so a listing says which ones
+// need a -p before they will run.
+func required(v engine.View) string {
+	var names []string
+	for _, p := range v.Params {
+		if p.Required && p.Default == "" {
+			names = append(names, p.Name)
+		}
+	}
+	return strings.Join(names, ", ")
+}
+
 // runView runs it and writes what it produced. Notes — a broken expression in
 // one cell — go to stderr: they belong with the diagnostics, not in the table
 // someone is piping into a file.
-func runView(ctx context.Context, out, errOut io.Writer, v engine.View) error {
+func runView(ctx context.Context, out, errOut io.Writer, v engine.View, args engine.Args) error {
 	if v.Follows() {
-		return followView(ctx, out, v)
+		return followView(ctx, out, v, args)
 	}
 
-	res, err := v.Run(ctx, nil)
+	res, err := v.Run(ctx, args)
 	if err != nil {
 		return err
 	}
@@ -111,8 +125,8 @@ func runView(ctx context.Context, out, errOut io.Writer, v engine.View) error {
 // followView streams a followed view's lines as they are written, the way
 // `kubectl logs -f` does. It ends when the script does, or when the context
 // is cancelled — which is what Ctrl-C does.
-func followView(ctx context.Context, out io.Writer, v engine.View) error {
-	ch, err := v.Stream(ctx, nil)
+func followView(ctx context.Context, out io.Writer, v engine.View, args engine.Args) error {
+	ch, err := v.Stream(ctx, args)
 	if err != nil {
 		return err
 	}
@@ -145,9 +159,12 @@ func completeViews(*cobra.Command, []string, string) ([]cobra.Completion, cobra.
 	}
 	var out []cobra.Completion
 	for _, v := range views {
-		if v.Listed() {
-			out = append(out, cobra.CompletionWithDesc(v.ID, v.Title))
-		}
+		out = append(out, cobra.CompletionWithDesc(v.ID, v.Title))
 	}
 	return out, cobra.ShellCompDirectiveNoFileComp
+}
+
+func init() {
+	viewCmd.Flags().StringArrayVarP(&viewParams, "param", "p", nil,
+		"a parameter the view declares, as name=value; repeatable")
 }

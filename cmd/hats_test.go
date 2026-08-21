@@ -94,7 +94,12 @@ func fromLocal(t *testing.T, dir string) {
 // cannot leak its store into the next.
 func runCmd(t *testing.T, stdin string, args ...string) (string, error) {
 	t.Helper()
-	hatsDirFlag, yesFlag = "", false
+	// Cobra keeps a flag's value on the command between runs, so every flag
+	// this tree has goes back to its zero value here: one test's --yes is
+	// otherwise still set when the next one asks a question.
+	hatsDirFlag, yesFlag, hatFlag = "", false, ""
+	viewParams, actParams = nil, nil
+	actAll, actYes = false, false
 
 	var out bytes.Buffer
 	rootCmd.SetOut(&out)
