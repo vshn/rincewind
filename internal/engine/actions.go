@@ -50,12 +50,22 @@ func compileActions(d Def) ([]Action, error) {
 				if err != nil {
 					return nil, err
 				}
+				rowless := act.Rowless
 				act.Confirm = func(rows []any, cur Args) (string, error) {
 					v, err := exprValue(code, rows, cur)
 					if err != nil {
 						return "", err
 					}
-					return valueText(v), nil
+					// The count is appended here, in the engine, rather than
+					// by whoever asks the question: config cannot write a
+					// confirmation that hides how much it touches, and the
+					// TUI and the CLI cannot drift into two answers. A
+					// rowless action is exactly one step, and that step is
+					// shown beside the question.
+					if rowless {
+						return valueText(v), nil
+					}
+					return fmt.Sprintf("%s (%s)", valueText(v), Plural(len(rows), "row")), nil
 				}
 			}
 		}

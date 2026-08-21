@@ -185,6 +185,7 @@ func newView(d Def, run func(context.Context, Args) (Result, error)) (View, erro
 		Refresh: d.Refresh,
 		Params:  d.Params,
 		Actions: actions,
+		Keyed:   d.Key != "",
 		Run:     run,
 	}, nil
 }

@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/vshn/rincewind/internal/engine"
-	"github.com/vshn/rincewind/internal/render"
 )
 
 // actionFor resolves a key to an action of the view on screen. It only
@@ -146,13 +145,9 @@ func (m *model) plan(t *tab) tea.Cmd {
 		m.notice = fmt.Sprintf("%s: %v", j.action.Name, err)
 		return m.closeTab()
 	}
-	// The count comes from here rather than from the config, so a
-	// confirmation cannot be written that fails to say how much it touches.
-	// A rowless action is exactly one step, and that step is on screen.
+	// The count is already in it: the engine appends it, so this tab and the
+	// `act` command ask the same question about the same rows.
 	j.prompt = prompt
-	if j.action.NeedsRows() {
-		j.prompt = fmt.Sprintf("%s (%s)", prompt, render.Plural(len(j.rows), "row"))
-	}
 	m.showResult()
 	return nil
 }
@@ -348,9 +343,9 @@ func (j *job) summary() string {
 		}
 	}
 	if failed > 0 {
-		return errStyle.Render(fmt.Sprintf("%d of %s failed", failed, render.Plural(len(j.steps), "step")))
+		return errStyle.Render(fmt.Sprintf("%d of %s failed", failed, engine.Plural(len(j.steps), "step")))
 	}
-	return goodStyle.Render(fmt.Sprintf("%s ok", render.Plural(len(j.steps), "step")))
+	return goodStyle.Render(fmt.Sprintf("%s ok", engine.Plural(len(j.steps), "step")))
 }
 
 // label names the job tab.

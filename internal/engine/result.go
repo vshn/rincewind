@@ -219,6 +219,12 @@ type View struct {
 	Actions []Action
 	Run     func(ctx context.Context, args Args) (Result, error)
 
+	// Keyed says the view declared a `key:` expression, so its rows have
+	// names a person could type. Without one the cells stand in, joined by a
+	// NUL — which the TUI selects with happily and a command line cannot name
+	// at all.
+	Keyed bool
+
 	// Stream is set instead of Run on a followed view: its output arrives as
 	// it is written rather than when the script exits. Cancelling the context
 	// kills the script, which is how one stops following.
