@@ -312,18 +312,27 @@ type model struct {
 // cur is the tab the content box is showing.
 func (m *model) cur() *tab { return m.tabs[m.act] }
 
-// Run starts the TUI and blocks until the user quits.
-func Run(views []engine.View, version string) error {
+// Run starts the TUI and blocks until the user quits, or until ctx is
+// cancelled — which is what a signal does. Handing the context to bubbletea
+// is what makes a SIGTERM come back through prog.Run, so the scripts still
+// running are stopped rather than orphaned by a process that just ends.
+func Run(ctx context.Context, views []engine.View, version string) error {
 	m := newModel(views)
 	m.version = version
 	m.lookupCluster = kubeContext
 	m.clipboard = localClipboard()
 
-	prog := tea.NewProgram(m)
+	prog := tea.NewProgram(m, tea.WithContext(ctx))
 	_, err := prog.Run()
 
 	// Whatever was still running has no one left to report to.
 	m.stopAll()
+
+	// Being asked to stop is not a failure to report; the tool was told to
+	// go, and it went.
+	if errors.Is(err, tea.ErrProgramKilled) {
+		return nil
+	}
 	return err
 }
 
