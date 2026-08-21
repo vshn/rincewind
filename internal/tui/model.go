@@ -395,6 +395,25 @@ func (m *model) next(i, step int) int {
 	return 0
 }
 
+// around steps one selectable entry, going round the ends: on the last view
+// a down lands on the first. The menu is a ring rather than a ladder because
+// it is short and visible whole — the far end is nearer than the way back.
+//
+// Only single steps wrap. A page that wrapped would land somewhere in the
+// middle after running off the end, which reads as a miss rather than as
+// coming round; and the row cursor in the output pane never wraps, because a
+// table of two hundred rows is not visible whole and losing one's place in it
+// is not a shortcut.
+func (m *model) around(i, step int) int {
+	if j := m.next(i, step); j != i {
+		return j
+	}
+	if step > 0 {
+		return m.next(-1, +1)
+	}
+	return m.next(len(m.entries), -1)
+}
+
 // selected is the view whose output is on screen.
 func (m *model) selected() *engine.View {
 	if m.cursor < 0 || m.cursor >= len(m.entries) {
@@ -928,7 +947,7 @@ func (m *model) toggleFocus() {
 // move steps the cursor of whichever pane has focus.
 func (m *model) move(step int) {
 	if m.focus == paneList {
-		m.cursor = m.next(m.cursor, step)
+		m.cursor = m.around(m.cursor, step)
 		m.syncSidebar()
 		return
 	}
