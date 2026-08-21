@@ -475,15 +475,76 @@ where out here Ctrl-C is the way back —
 and it cancels the context rather than killing the process,
 so a followed script is stopped rather than orphaned.
 
-**Parameters are not passed yet, and there is no filter.**
-A view that requires a parameter is refused
-rather than run on a value it made up,
-and the refusal names both the missing parameter and the views that do work.
-Narrowing the output is the other half of the same gap:
-in the TUI `/` is what narrows a view,
+**Parameters are `-p name=value`**, repeated, and they reach the script as
+environment variables exactly as they do in the TUI.
+A flag per parameter would have to be declared before the hat is read,
+and it would put the hat's vocabulary into this tool's usage line:
+these are the hat's parameters, not rincewind's.
+Nothing is prompted for here —
+this command prints and exits, and a question on the way to a pipe is a hang —
+so a required parameter without a value is refused by name.
+
+**There is still no filter.**
+In the TUI `/` is what narrows a view,
 and out here `grep` is not a substitute,
 because it takes the header with the rows it drops.
 See the decisions table.
+
+## Acting from the command line
+
+`rincewind act <view> <action> [key…]` runs a view's action without the TUI.
+It is the same four movements the job tab makes —
+collect, plan, ask, run — and the same engine underneath:
+`Bind`, `Plan`, `Confirm` and `Step.Run` are what both are made of.
+That shared middle is the point:
+a second way to run an action must not become a second idea of what one is.
+
+**Rows are named, not selected.**
+In the TUI a mutation refuses without a selection,
+because a forgotten filter must not turn one loose on everything on screen.
+Out here there is no filter to forget,
+and a key typed on a command line is the most deliberate selection there is.
+What carries over is that it must be deliberate:
+with no keys and no `--all` the command refuses
+and prints the keys it would have taken.
+`-` reads them from stdin instead, which is how a pipeline composes:
+
+```
+rincewind view argo.apps | awk '$2=="OutOfSync" {print $1}' \
+  | rincewind act argo.apps sync - --yes
+```
+
+The keys are the same keys the TUI's selection is made of,
+which is why a view without a `key:` expression is refused here:
+the cells stand in for one, joined by a NUL,
+and the TUI selects with that happily where a person cannot type it.
+
+**A named row that is not there stops everything**, the found ones included.
+It is a mistake about the world rather than a partial job,
+and half of a bulk action is worse than none of it.
+
+**The plan is always printed, and the question always asked.**
+`--yes` is the way past the question, never past the plan:
+the invocations are on stderr before anything runs, one per row,
+in the same env-shell-script form the job tab shows.
+Where the TUI runs an action with no `confirm:` unasked —
+one selected the rows and pressed its key, which is deliberate enough —
+`act` asks anyway, generically, because out here neither of those happened.
+With `--yes` the question is still *said*, just not asked:
+the hat puts its warning in the confirmation text,
+and agreeing in advance is not a reason never to have been told.
+
+**The transcript goes to stderr and the results to stdout.**
+The same split `view` makes for its notes, and for the same reason:
+the plan and the question are diagnostics,
+so `act … --yes > out.txt` catches what the scripts printed and nothing else.
+A step that fails is named by its row on stderr, the rest still run,
+and the count becomes the exit status —
+"2 of 5 steps failed" is what a pipeline reads.
+
+**Navigating actions are refused**, naming the `view` command that does it.
+Drill-down out here is composition — run the target view with `-p` —
+and the refusal hands over that command line rather than reimplementing it.
 
 ## The cluster
 
@@ -769,7 +830,7 @@ and only redraws when the tab comes forward.
 ## Layout
 
 ```
-cmd/               cobra wiring: root (TUI), check, view, hats, --hat
+cmd/               cobra wiring: root (TUI), check, view, act, hats, --hat
 internal/
   config/          YAML → typed defs; schema validation; hands off to engine
   engine/          Def → compiled View; script runner, JSON stream decode,
@@ -900,9 +961,21 @@ example/           a hat that invents its data, and the config fixture
 | The mouse toggle is `M`, not `m` | Lower-case letters belong to the views, which have far more use for them than one global toggle |
 | Planning is separate from running in the engine | The command can only be shown up front if producing it executes nothing |
 | A step is shown as env + shell + script, not one quoted line | The values never enter the script text; a quoted one-liner would misrepresent what runs |
-| The engine appends the count to a confirmation | A confirmation that fails to say how much it touches cannot be written |
+| The engine appends the count to a confirmation | A confirmation that fails to say how much it touches cannot be written — and with two callers it is also the only place the TUI and `act` cannot drift into asking different questions about the same rows |
 | Config validated against the target view at load | The old `no such view` was a run-time surprise; so was an argument nothing read |
-| The five list views lost their optional filter parameters in the port | In the TUI `/` does that job better; the debt is the CLI's, where `view` has no way to narrow output at all |
+| The five list views lost their optional filter parameters in the port | In the TUI `/` does that job better; the debt is the CLI's, where there is still no way to narrow output — `-p` closed the parameter half of it, `grep` cannot close the rest because it takes the header with the rows it drops |
+| Parameters out here are `-p name=value`, not a flag each | A generated flag would have to exist before the hat is read, and it would put the hat's vocabulary into rincewind's usage line |
+| `view` prompts for nothing | Its output is meant to be piped, and a question on the way to a pipe is a hang |
+| `act` is a subcommand, not a flag on `view` | It changes what the command *is* — not "print, but also mutate" — which is the same reason `view` is one |
+| An action is named by its name, not its key | A key is what fits on an action bar; out here there is room for the word, and `act pools pause` reads as the sentence it is |
+| Rows are named by key rather than selected | There is no filter to forget out here, and a typed key is the most deliberate selection there is; with none named it refuses and prints the keys, which is the command line's "select rows first" |
+| A view without `key:` cannot be acted on from the command line | The cells stand in for a key, joined by a NUL: the TUI selects with that happily, a person cannot type it |
+| One unknown key stops the whole run | It is a mistake about the world, not a partial job, and half of a bulk action is worse than none |
+| `-` needs `--yes` | Keys off stdin leave nothing to answer the question with, and a closed stdin is a no — it would refuse every time, looking like it did nothing |
+| `act` asks even when the hat wrote no `confirm:` | In the TUI the selection and the keypress are the deliberate act the question would otherwise be; out here neither happened |
+| `--yes` skips the asking, never the showing | The hat's warning lives in the confirmation text, and agreeing in advance is not a reason never to have been told |
+| The plan and the question go to stderr, the scripts' output to stdout | The same split `view` makes for its notes: interaction is diagnostics, and a redirect should catch the results rather than the transcript |
+| A navigating action is refused, with the `view` command spelled out | Drilling out here is composition — run the target with `-p` — and reimplementing it would be a second answer to the same question |
 | A required parameter hides a view from the menu | Running it bare would show an arbitrary object as if it were the answer; no `hidden:` flag needed |
 | Sort on raw values, before formatting | Rendered cells order neither numbers nor dates correctly |
 | Emphasis per column, on raw values | One value may mean different things in different columns |

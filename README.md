@@ -76,6 +76,7 @@ rincewind                      # TUI, on the hat above
 rincewind --hat ./example      # try it without a cluster, no install needed
 rincewind check                # validate the hat without starting the TUI
 rincewind view nodes.status    # print one view and exit, no TUI
+rincewind act nodes.status cordon node-a   # run one of its actions
 ```
 
 A hat is found with `--hat`, else `$RINCEWIND_HAT`. There is no third step: with
@@ -92,8 +93,32 @@ it.
 `view` writes a table column-aligned, a log verbatim, and a followed view as
 it streams. Colour is used only when the output is a terminal, so piping into
 a file gives plain text; cell errors go to stderr, out of the way of it. A
-view that requires a parameter is refused for now — there is no way to pass
-one yet.
+view that declares parameters takes them as `-p name=value`.
+
+`act` runs one of a view's actions without the TUI. Rows are named by their
+key — run it without any to see them, or `--all` for every row:
+
+```
+$ rincewind act argo.apps sync wildfly
+sync  wildfly
+  app=wildfly
+  sh -c
+    argocd app sync "$app"
+
+Sync wildfly (1 row) [y/N]
+```
+
+Same order as the TUI — collect, plan, ask, run — and the same engine
+underneath. The plan and the question go to stderr and only what the scripts
+printed goes to stdout, so a redirect catches the results rather than the
+transcript. `-p name=value` supplies parameters, a terminal is asked for
+whatever is left, and `--yes` skips the question but never the plan. `-` reads
+the keys from stdin, which is how it composes:
+
+```
+rincewind view argo.apps | awk '$2=="OutOfSync" {print $1}' \
+  | rincewind act argo.apps sync - --yes
+```
 
 A view whose output is a log rather than a table is `class: text`:
 the lines arrive verbatim, `/` greps them, and the arrows scroll.

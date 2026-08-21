@@ -18,9 +18,11 @@ All 16 of the previous generation's views are ported,
 the two log views as followed text views.
 `class: chart` draws time series in braille (via ntcharts);
 `example/metrics.yaml` is the reference.
-TUI only.
+Besides the TUI there are two non-interactive commands:
+`view` prints one view, `act` runs one of its actions —
+same engine, rows named by key instead of selected.
 
-Not built yet: batched (`once:`) actions; CLI output mode;
+Not built yet: batched (`once:`) actions; a filter for `view`;
 `loki` and `pods`; a managed port-forward for `argo ui`.
 
 ## Docs
@@ -99,8 +101,18 @@ Both kinds of action open a tab; `esc` closes it.
 - **A mutation acts on the selection and refuses without one.**
   The filter is no longer the selector; `a` selects what it left.
   Do not "helpfully" fall back to the filtered set.
+  On the command line the rows are named instead —
+  a typed key is that same deliberate act — and `act` refuses
+  with neither keys nor `--all`.
 - **The engine appends the row count to every confirmation**,
-  so config cannot write one that hides how much it touches.
+  in `compileActions` and nowhere else,
+  so config cannot write one that hides how much it touches
+  and the TUI and `act` cannot ask different questions about the same rows.
+- **`act` shows the plan and asks, always.**
+  `--yes` skips the asking, never the showing;
+  the hat's warning lives in the confirmation text, so that is said either way.
+  The plan and the question go to stderr, the scripts' output to stdout:
+  a redirect catches the results, not the transcript.
 - **An action runs once per row**, each call naming one object.
 - **The command is on screen before it runs.**
   `Plan` produces steps without executing anything;
@@ -184,7 +196,8 @@ charm.land/bubbletea/v2   charm.land/bubbles/v2   charm.land/lipgloss/v2
 ## Layout
 
 ```
-cmd/          cobra wiring: root (TUI), check, view, hats, --hat flag
+cmd/          cobra wiring: root (TUI), check, view, act, hats, --hat flag
+              params.go  -p name=value, shared by view and act
 internal/
   config/     YAML → typed defs, schema validation → engine.Def
   hats/       the store: GitHub source parsing, clone scanning, git, search
@@ -212,6 +225,7 @@ go test ./...
 go run . --hat example                    # invented data, no cluster needed
 go run . check --hat example              # validate a hat
 go run . view demo.services --hat example # print one view, no TUI
+go run . act demo.services restart api --hat example   # run one action
 go run . hats search                      # find hats on GitHub
 CGO_ENABLED=0 go build -o rincewind .    # static, how it ships
 make                                     # lint (golangci-lint), test, build
