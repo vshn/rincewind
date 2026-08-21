@@ -187,7 +187,10 @@ internal/
               script runner, stream decode, gojq, sort, formats;
               Table/Row/Cell, Args/Param/Action
   render/     Table → styled lines
-  tui/        model.go   bubbletea model, tabs, keys, mouse
+  tui/        model.go   bubbletea model, tabs, the update loop, mouse
+              keys.go    the binding table and the movement it causes
+              layout.go  boxes, hit-testing, scroll positions
+              paint.go   View and everything it renders
               action.go  firing actions, confirmation, drill
               frame.go   framed boxes, tab bar, action bar
 example/      a hat that invents its own data, needs no cluster; this is
