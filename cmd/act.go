@@ -125,6 +125,17 @@ func actKeys(in io.Reader, keys []string) (out []string, piped bool, err error) 
 		if piped {
 			return nil, false, fmt.Errorf("- given twice")
 		}
+		// Both refusals come before anything is read. Without --yes this can
+		// only end in one, and reading first would sit on a terminal's stdin
+		// until EOF before saying so.
+		if !actYes {
+			return nil, false, fmt.Errorf(
+				"keys read from stdin leave nothing to answer the question with\n\nadd --yes, having read the plan another way")
+		}
+		if interactive(in) {
+			return nil, false, fmt.Errorf(
+				"- reads keys from stdin, and stdin is this terminal\n\npipe them in, or name the rows instead")
+		}
 		piped = true
 
 		text, err := io.ReadAll(reader(in))
@@ -136,10 +147,6 @@ func actKeys(in io.Reader, keys []string) (out []string, piped bool, err error) 
 				out = append(out, line)
 			}
 		}
-	}
-	if piped && !actYes {
-		return nil, false, fmt.Errorf(
-			"keys read from stdin leave nothing to answer the question with\n\nadd --yes, having read the plan another way")
 	}
 	return out, piped, nil
 }
@@ -346,7 +353,9 @@ func work(ctx context.Context, out, errOut io.Writer, steps []engine.Step) error
 			say(errOut, "%s%v\n", where(s), err)
 		}
 		for _, line := range lines {
-			fmt.Fprintln(out, line) //nolint:errcheck // a closed stdout reports itself below
+			// A stdout that went away must not abort a run of mutations
+			// half-way: the steps are the work, the printing is the report.
+			fmt.Fprintln(out, line) //nolint:errcheck
 		}
 		// Being told to stop leaves the rest unrun rather than pressing on.
 		if ctx.Err() != nil {

@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"io"
 	"strings"
 	"testing"
 
@@ -237,6 +238,42 @@ func TestActUnknownActionListsThem(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}
+	}
+}
+
+// tripwire is a stdin that must never be read: the refusals around `-` have
+// to come first, or a terminal's stdin would be sat on until EOF before
+// anything is said.
+type tripwire struct{ t *testing.T }
+
+func (r tripwire) Read([]byte) (int, error) {
+	r.t.Error("stdin was read before the refusal")
+	return 0, io.EOF
+}
+
+func TestActDashRefusesBeforeReading(t *testing.T) {
+	hatsDirFlag, yesFlag, hatFlag = "", false, ""
+	viewParams, actParams = nil, nil
+	actAll, actYes = false, false
+
+	var o, e bytes.Buffer
+	rootCmd.SetOut(&o)
+	rootCmd.SetErr(&e)
+	rootCmd.SetIn(tripwire{t})
+	rootCmd.SetArgs([]string{"act", "demo.services", "restart", "-", "--hat", demoHat})
+	t.Cleanup(func() {
+		rootCmd.SetOut(nil)
+		rootCmd.SetErr(nil)
+		rootCmd.SetIn(nil)
+		rootCmd.SetArgs(nil)
+	})
+
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("keys from stdin were taken without --yes")
+	}
+	if !strings.Contains(err.Error(), "--yes") {
+		t.Errorf("error %q does not say what would work", err)
 	}
 }
 

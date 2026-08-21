@@ -24,10 +24,12 @@ func parseParams(pairs []string) (engine.Args, error) {
 	out := engine.Args{}
 	for _, pair := range pairs {
 		name, value, ok := strings.Cut(pair, "=")
-		switch {
-		case !ok || name == "":
+		if !ok || name == "" {
 			return nil, fmt.Errorf("--param %q is not name=value", pair)
-		case out[name] != "":
+		}
+		// Presence, not the value: `-p x=` is given, and a second x after it
+		// is still the same mistake.
+		if _, dup := out[name]; dup {
 			return nil, fmt.Errorf("--param %s given twice", name)
 		}
 		out[name] = value
