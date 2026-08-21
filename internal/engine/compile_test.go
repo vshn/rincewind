@@ -3,6 +3,7 @@ package engine
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // A config mistake must die at compile time with the view and field named —
@@ -74,5 +75,34 @@ func TestCompileDefaults(t *testing.T) {
 	}
 	if v.Title != "x" {
 		t.Errorf("title %q, want the id as fallback", v.Title)
+	}
+}
+
+// A hat's jq is code, and code can loop. These expressions are evaluated
+// from the TUI's Update, so an unbounded one would be a frozen tool: it has
+// to come back as an error instead.
+func TestActionExpressionsGiveUp(t *testing.T) {
+	old := exprTimeout
+	exprTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { exprTimeout = old })
+
+	v, err := Compile(Def{
+		ID: "demo.loop", Script: "true", Rows: ".",
+		Columns: []ColumnDef{{Name: "N", Expr: ".n"}},
+		Actions: []ActionDef{{
+			Key: "x", Name: "spin", Script: "true",
+			Env: map[string]string{"NAME": "last(repeat(1))"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	if _, err := v.Actions[0].Plan([]any{map[string]any{"n": 1}}, nil); err == nil {
+		t.Fatal("an expression that never finishes was planned anyway")
+	}
+	if took := time.Since(start); took > time.Second {
+		t.Errorf("planning took %v, want it to give up at the deadline", took)
 	}
 }

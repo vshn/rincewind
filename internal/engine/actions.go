@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/itchyny/gojq"
 )
@@ -50,7 +51,7 @@ func compileActions(d Def) ([]Action, error) {
 					return nil, err
 				}
 				act.Confirm = func(rows []any, cur Args) (string, error) {
-					v, err := firstValue(context.Background(), code, rows, cur)
+					v, err := exprValue(code, rows, cur)
 					if err != nil {
 						return "", err
 					}
@@ -61,6 +62,20 @@ func compileActions(d Def) ([]Action, error) {
 		out = append(out, act)
 	}
 	return out, nil
+}
+
+// exprTimeout bounds one action expression. Args, Plan and Confirm are
+// evaluated straight from the TUI's Update, which paints nothing while they
+// run, so `while(true; .)` written into a hat would be a frozen tool with no
+// way out. A var rather than a const, so a test need not wait it out.
+var exprTimeout = 2 * time.Second
+
+// exprValue is firstValue under that deadline. Every action expression goes
+// through it; a jq expression is config, and config gets no unbounded turn.
+func exprValue(code *gojq.Code, in any, cur Args) (any, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), exprTimeout)
+	defer cancel()
+	return firstValue(ctx, code, in, cur)
 }
 
 // compileArgs builds the evaluator for a navigating action's parameters.
@@ -77,7 +92,7 @@ func compileArgs(view, where string, exprs map[string]string) (func(any, Args) (
 	return func(src any, cur Args) (Args, error) {
 		out := Args{}
 		for name, code := range codes {
-			v, err := firstValue(context.Background(), code, src, cur)
+			v, err := exprValue(code, src, cur)
 			if err != nil {
 				// A refusal written into the expression — a pool selecting by
 				// expression, say — arrives here. It is the answer, not a
@@ -118,7 +133,7 @@ func compilePlan(d Def, a ActionDef, where string, rowless bool) (func([]any, Ar
 			// expressions work from $args — which is where a rowless
 			// action's values come from anyway.
 			for name, code := range codes {
-				v, err := firstValue(context.Background(), code, nil, cur)
+				v, err := exprValue(code, nil, cur)
 				if err != nil {
 					return nil, fmt.Errorf("env %s: %v", name, err)
 				}
@@ -140,7 +155,7 @@ func compilePlan(d Def, a ActionDef, where string, rowless bool) (func([]any, Ar
 			for name, code := range codes {
 				// Planning must not run anything, so a failing expression is
 				// refused here rather than half-executing the set.
-				v, err := firstValue(context.Background(), code, row, cur)
+				v, err := exprValue(code, row, cur)
 				if err != nil {
 					return nil, fmt.Errorf("env %s: %v", name, err)
 				}
