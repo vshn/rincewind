@@ -42,9 +42,9 @@ const (
 func cli(w io.Writer, res engine.Result, colour bool) error {
 	lines := res.Lines
 	switch {
-	case res.Chart():
+	case res.IsChart():
 		lines = Chart(res, cliChartWidth, cliChartHeight, colour)
-	case !res.Text():
+	case !res.IsText():
 		style := Style{}
 		if colour {
 			style = Style{Header: func(s string) string { return cliHeader.Render(s) }, Cell: cliCell}

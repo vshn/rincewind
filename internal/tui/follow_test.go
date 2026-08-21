@@ -329,7 +329,7 @@ func TestOpeningAnotherViewStopsTheScript(t *testing.T) {
 
 	// Collapse to one tab first, so the followed view is the one replaced.
 	m.tabs[0] = m.tabs[1]
-	m.tabs, m.act = m.tabs[:1], 0
+	m.tabs, m.active = m.tabs[:1], 0
 
 	m.focus = paneList
 	m.Update(key("enter"))

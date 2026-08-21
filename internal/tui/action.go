@@ -51,7 +51,7 @@ func (m *model) fire(a *engine.Action) tea.Cmd {
 	// the action needs values, then the commands, then the question.
 	from := m.cur()
 	m.park()
-	m.closeFrom(m.act + 1)
+	m.closeFrom(m.active + 1)
 
 	t := &tab{job: &job{
 		action: *a, rows: rows, keys: keys, args: from.args,
@@ -61,7 +61,7 @@ func (m *model) fire(a *engine.Action) tea.Cmd {
 		t.job.reload = from
 	}
 	m.tabs = append(m.tabs, t)
-	m.act = len(m.tabs) - 1
+	m.active = len(m.tabs) - 1
 	m.filter.SetValue("")
 	m.vp.SetYOffset(0)
 	m.vp.SetXOffset(0)
@@ -172,13 +172,13 @@ func (m *model) drill(a *engine.Action) tea.Cmd {
 	// Drilling from a tab in the middle abandons what was opened from it:
 	// the tabs are one path, not a heap of windows.
 	m.park()
-	m.closeFrom(m.act + 1)
+	m.closeFrom(m.active + 1)
 
 	args, err := a.Args(src, m.cur().args)
 
 	t := newTab(a.Open, args)
 	m.tabs = append(m.tabs, t)
-	m.act = len(m.tabs) - 1
+	m.active = len(m.tabs) - 1
 	m.filter.SetValue("")
 	m.focus = paneOutput
 

@@ -258,7 +258,7 @@ func TestHatDemoTextViewKeepsItsLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.Text() {
+	if !res.IsText() {
 		t.Fatal("a text view produced rows")
 	}
 	if len(res.Rows) != 0 || res.Cols != nil {
@@ -287,7 +287,7 @@ func TestHatDemoChartDrawsSeries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.Chart() {
+	if !res.IsChart() {
 		t.Fatal("a chart view did not produce series")
 	}
 	if len(res.Notes) > 0 {

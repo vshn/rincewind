@@ -74,11 +74,11 @@ type Result struct {
 	YRange *[2]float64
 }
 
-// Text reports which shape this is.
-func (r Result) Text() bool { return r.Lines != nil }
+// IsText reports which shape this is.
+func (r Result) IsText() bool { return r.Lines != nil }
 
-// Chart reports whether this is a chart view's result.
-func (r Result) Chart() bool { return r.Series != nil }
+// IsChart reports whether this is a chart view's result.
+func (r Result) IsChart() bool { return r.Series != nil }
 
 // Series is one named line of a chart: measurements in time order. The name
 // is the legend label, and what the filter matches.

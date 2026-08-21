@@ -258,9 +258,9 @@ type model struct {
 	clipboard []string
 
 	// tabs is never empty: the content box always shows something, even
-	// before the first run. act indexes the one on screen.
-	tabs []*tab
-	act  int
+	// before the first run. active indexes the one on screen.
+	tabs   []*tab
+	active int
 
 	focus pane
 
@@ -313,7 +313,7 @@ type model struct {
 }
 
 // cur is the tab the content box is showing.
-func (m *model) cur() *tab { return m.tabs[m.act] }
+func (m *model) cur() *tab { return m.tabs[m.active] }
 
 // Run starts the TUI and blocks until the user quits, or until ctx is
 // cancelled — which is what a signal does. Handing the context to bubbletea
@@ -449,9 +449,9 @@ func (m *model) rowCount() int { return len(m.visible().Rows) }
 func (m *model) shownCount() int {
 	vis := m.visible()
 	switch {
-	case vis.Text():
+	case vis.IsText():
 		return len(vis.Lines)
-	case vis.Chart():
+	case vis.IsChart():
 		return len(vis.Series)
 	}
 	return len(vis.Rows)
@@ -463,9 +463,9 @@ func (m *model) total() int {
 	switch {
 	case t.res == nil:
 		return 0
-	case t.res.Text():
+	case t.res.IsText():
 		return len(t.res.Lines)
-	case t.res.Chart():
+	case t.res.IsChart():
 		return len(t.res.Series)
 	default:
 		return len(t.res.Rows)
@@ -773,7 +773,7 @@ func (m *model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case len(m.cur().selection) > 0:
 			m.cur().selection = map[string]bool{}
 			m.showResult()
-		case m.act > 0:
+		case m.active > 0:
 			// A drill-down is closed by the key one already reaches for.
 			return m, m.closeTab()
 		case m.focus == paneOutput:
@@ -835,10 +835,10 @@ func (m *model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "]":
-		return m, m.activate(m.act + 1)
+		return m, m.activate(m.active + 1)
 
 	case "[", "shift+tab":
-		return m, m.activate(m.act - 1)
+		return m, m.activate(m.active - 1)
 
 	case "x":
 		return m, m.closeTab()
@@ -1170,7 +1170,7 @@ func (m *model) open() tea.Cmd {
 	// cancelled by hand — a followed one would otherwise keep a script alive
 	// with nothing left on screen to show for it.
 	m.tabs[0].stop()
-	m.tabs[0], m.act = newTab(m.selected(), nil), 0
+	m.tabs[0], m.active = newTab(m.selected(), nil), 0
 	m.filter.SetValue("")
 	m.focus = paneList
 	return m.launch(m.cur())
@@ -1284,20 +1284,20 @@ func (m *model) closeFrom(i int) {
 		t.stop()
 	}
 	m.tabs = m.tabs[:i]
-	m.act = min(m.act, len(m.tabs)-1)
+	m.active = min(m.active, len(m.tabs)-1)
 }
 
 // activate switches the content box to tab i, parking the scroll position
 // and the filter of the one being left: coming back has to land exactly
 // where one left, which is the whole reason tabs replaced the view stack.
 func (m *model) activate(i int) tea.Cmd {
-	if i < 0 || i >= len(m.tabs) || i == m.act {
+	if i < 0 || i >= len(m.tabs) || i == m.active {
 		return nil
 	}
 	m.park()
 	m.pauseStream(m.cur())
 
-	m.act = i
+	m.active = i
 	return m.restore(m.cur())
 }
 
@@ -1317,12 +1317,12 @@ func (m *model) restore(t *tab) tea.Cmd {
 // closeTab drops the active tab and falls back to the one it was opened
 // from. The first tab stays: the content box always shows something.
 func (m *model) closeTab() tea.Cmd {
-	if m.act == 0 {
+	if m.active == 0 {
 		return nil
 	}
-	to := m.act - 1
-	m.closeFrom(m.act)
-	m.act = to
+	to := m.active - 1
+	m.closeFrom(m.active)
+	m.active = to
 	return m.restore(m.cur())
 }
 
@@ -1406,7 +1406,7 @@ func (m *model) vpHeight() int {
 func (m *model) hasTable() bool {
 	t := m.cur()
 	return t.job == nil && t.err == nil && !t.running &&
-		t.res != nil && !t.res.Text() && m.rowCount() > 0
+		t.res != nil && !t.res.IsText() && m.rowCount() > 0
 }
 
 // hasText reports whether the content box is showing a text view's lines.
@@ -1414,7 +1414,7 @@ func (m *model) hasText() bool {
 	t := m.cur()
 	// A followed view has lines while it is still running, which is the
 	// whole point; only an error hides them.
-	return t.job == nil && t.err == nil && t.res != nil && t.res.Text() &&
+	return t.job == nil && t.err == nil && t.res != nil && t.res.IsText() &&
 		(!t.running || t.stream != nil)
 }
 
@@ -1422,7 +1422,7 @@ func (m *model) hasText() bool {
 // view it has no rows, so the arrows scroll rather than moving a cursor.
 func (m *model) hasChart() bool {
 	t := m.cur()
-	return t.job == nil && t.err == nil && !t.running && t.res != nil && t.res.Chart()
+	return t.job == nil && t.err == nil && !t.running && t.res != nil && t.res.IsChart()
 }
 
 // statusLines is the room the status bar takes, so the viewport shrinks
@@ -1447,7 +1447,7 @@ func filtered(t engine.Result, needle string) engine.Result {
 	}
 
 	// Filtering a log is grep, and is most of what one does with one.
-	if t.Text() {
+	if t.IsText() {
 		out := engine.Result{Lines: []string{}, Notes: t.Notes}
 		for _, line := range t.Lines {
 			if strings.Contains(strings.ToLower(line), needle) {
@@ -1459,7 +1459,7 @@ func filtered(t engine.Result, needle string) engine.Result {
 
 	// Filtering a chart picks series by name: /worker keeps the workers'
 	// lines and drops the rest, which is how one node is read out of a pool.
-	if t.Chart() {
+	if t.IsChart() {
 		out := engine.Result{Series: []engine.Series{}, Notes: t.Notes, YRange: t.YRange}
 		for _, s := range t.Series {
 			if strings.Contains(strings.ToLower(s.Name), needle) {
@@ -1500,7 +1500,7 @@ func (m *model) showResult() {
 
 	// A text view's lines go in as they came out of the script: no header,
 	// no styling, no truncation. Whitespace is part of what is being read.
-	if vis.Text() {
+	if vis.IsText() {
 		lines := vis.Lines
 		// That a followed script stopped is itself a finding — the pod went
 		// away — so it is said under the last line rather than swallowed.
@@ -1513,7 +1513,7 @@ func (m *model) showResult() {
 
 	// A chart is drawn to the pane's size, so resizing re-renders it here.
 	// Notes ride below it, exactly as they do under a table.
-	if vis.Chart() {
+	if vis.IsChart() {
 		var lines []string
 		if len(vis.Series) > 0 {
 			lines = render.Chart(vis, m.contentWidth(), m.vpHeight(), true)

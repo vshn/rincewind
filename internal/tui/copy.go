@@ -69,14 +69,14 @@ func (m *model) copyLines() (lines []string, what string) {
 	}
 
 	vis := m.visible()
-	if vis.Text() {
+	if vis.IsText() {
 		return vis.Lines, render.Plural(len(vis.Lines), "line")
 	}
 
 	// A chart copies as it shows — the braille plot with its legend — drawn
 	// again without colour, because escape codes pasted into a ticket are
 	// noise the way they are in a job's lines.
-	if vis.Chart() {
+	if vis.IsChart() {
 		for _, line := range render.Chart(vis, m.contentWidth(), m.vpHeight(), false) {
 			lines = append(lines, strings.TrimRight(line, " "))
 		}
