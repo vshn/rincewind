@@ -1295,7 +1295,12 @@ func (m *model) activate(i int) tea.Cmd {
 	m.pauseStream(m.cur())
 
 	m.act = i
-	t := m.cur()
+	return m.restore(m.cur())
+}
+
+// restore puts a tab back on screen exactly as it was left, which is the
+// whole reason tabs replaced the view stack.
+func (m *model) restore(t *tab) tea.Cmd {
 	m.filter.SetValue(t.filter)
 
 	// The offsets go back before showResult, whose follow() would otherwise
@@ -1315,13 +1320,7 @@ func (m *model) closeTab() tea.Cmd {
 	to := m.act - 1
 	m.closeFrom(m.act)
 	m.act = to
-
-	t := m.cur()
-	m.filter.SetValue(t.filter)
-	m.vp.SetYOffset(t.yOff)
-	m.vp.SetXOffset(t.xOff)
-	m.showResult()
-	return m.resume(t)
+	return m.restore(m.cur())
 }
 
 // resume re-arms a returning tab's refresh, reloading at once when the data

@@ -123,21 +123,33 @@ func compilePlan(d Def, a ActionDef, where string, rowless bool) (func([]any, Ar
 		codes[name] = code
 	}
 
+	// evalEnv is one step's environment: the values the view was opened
+	// with, then the action's own expressions over the input. Planning must
+	// not run anything, so a failing expression is refused here rather than
+	// half-executing the set.
+	evalEnv := func(input any, cur Args) (Args, error) {
+		env := Args{}
+		for name, value := range cur {
+			env[name] = value
+		}
+		for name, code := range codes {
+			v, err := exprValue(code, input, cur)
+			if err != nil {
+				return nil, fmt.Errorf("env %s: %v", name, err)
+			}
+			env[name] = valueText(v)
+		}
+		return env, nil
+	}
+
 	if rowless {
 		return func(_ []any, cur Args) ([]Step, error) {
-			env := Args{}
-			for name, value := range cur {
-				env[name] = value
-			}
 			// No row to evaluate against, so the input is null and the
 			// expressions work from $args — which is where a rowless
 			// action's values come from anyway.
-			for name, code := range codes {
-				v, err := exprValue(code, nil, cur)
-				if err != nil {
-					return nil, fmt.Errorf("env %s: %v", name, err)
-				}
-				env[name] = valueText(v)
+			env, err := evalEnv(nil, cur)
+			if err != nil {
+				return nil, err
 			}
 			// Empty rather than nil: a nil stdin leaves the script attached
 			// to the terminal, where it would eat the user's keystrokes.
@@ -148,18 +160,9 @@ func compilePlan(d Def, a ActionDef, where string, rowless bool) (func([]any, Ar
 	return func(rows []any, cur Args) ([]Step, error) {
 		steps := make([]Step, 0, len(rows))
 		for _, row := range rows {
-			env := Args{}
-			for name, value := range cur {
-				env[name] = value
-			}
-			for name, code := range codes {
-				// Planning must not run anything, so a failing expression is
-				// refused here rather than half-executing the set.
-				v, err := exprValue(code, row, cur)
-				if err != nil {
-					return nil, fmt.Errorf("env %s: %v", name, err)
-				}
-				env[name] = valueText(v)
+			env, err := evalEnv(row, cur)
+			if err != nil {
+				return nil, err
 			}
 
 			// The row itself goes to stdin, so a script needing more than the
