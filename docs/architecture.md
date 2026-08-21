@@ -278,7 +278,11 @@ rather than when the script exits.
 Only a text view may:
 a table is sorted and column-aligned over the whole set,
 so it has no way to grow a row at a time.
-It rules out `refresh`, for the same reason a live thing is not polled.
+It rules out `refresh`, for the same reason a live thing is not polled,
+and `reload: true` on any of its actions:
+following resumes by itself on the way back to the tab,
+and a reload from a job tab would start the stream
+behind a tab nobody is looking at.
 
 The engine keeps the two paths apart rather than blurring them.
 A snapshot view has a `Run` returning a `Result`;

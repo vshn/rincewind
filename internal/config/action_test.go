@@ -253,6 +253,24 @@ func TestBrokenActionsFailWithContext(t *testing.T) {
 			want: []string{"demo.list", "follow needs class: text"},
 		},
 		{
+			name: "reload on an action of a followed view",
+			yaml: `
+views:
+  - id: demo.log
+    class: text
+    follow: true
+    source:
+      script: echo hello
+    actions:
+      - key: p
+        name: rotate
+        scope: none
+        script: echo rotate
+        reload: true
+`,
+			want: []string{"demo.log", "rotate", "reload cannot re-run a followed view"},
+		},
+		{
 			name: "follow with refresh",
 			yaml: `
 views:

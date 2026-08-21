@@ -366,6 +366,13 @@ func toDef(v view) (engine.Def, error) {
 		if (d.Text || d.Chart) && (a.Open != "" || a.Scope != engine.ScopeNone) {
 			return fail("action %s: a %s view has no rows, so its actions need scope: none", a.Name, v.Class)
 		}
+		// A followed view has no finished state to return to: leaving its
+		// tab pauses the stream and coming back starts it again. Reloading
+		// one from a job tab would start a stream behind a background tab,
+		// which is the one thing following must not do.
+		if d.Follow && a.Reload {
+			return fail("action %s: reload cannot re-run a followed view; following resumes by itself", a.Name)
+		}
 		if actNames[a.Name] {
 			return fail("action %s: declared twice", a.Name)
 		}
