@@ -577,6 +577,45 @@ and the topic search exists nowhere else.
 `owner/repo` and a `github.com` URL are the two spellings accepted;
 anything else is refused by name rather than half-supported.
 
+**Cloned over ssh, falling back to https.**
+A hat repository is as often private as not,
+and an ssh key is the credential people already have —
+where https would want a token this tool will never ask for,
+since a prompt in a command nobody is watching is a hang, not a question.
+So `install` names both spellings of the repository
+and tries them in order:
+
+```
+  from   git@github.com:vshn/rincewind-hats.git
+  else   https://github.com/vshn/rincewind-hats
+  into   ~/.config/rincewind/vshn-rincewind-hats
+```
+
+Three things make that safe rather than merely clever:
+
+- **ssh is offered only when there is ssh to run.**
+  Probed on `PATH`, like the clipboard writer and like git itself —
+  a machine without it is shown one url, not a plan half of which is fiction.
+  The listing and the attempt come from one function,
+  so what is printed cannot differ from what runs.
+- **The ssh attempt cannot hang.**
+  `GIT_TERMINAL_PROMPT=0` silences git, but ssh has prompts of its own —
+  an unknown host key, a passphrase — and reads them from the terminal,
+  so the attempt adds `BatchMode=yes`.
+  A transport that cannot work has to fail rather than wait,
+  or the fallback never gets its turn.
+  Whatever ssh command the user already configured is *extended* rather than
+  replaced, in git's own order — `$GIT_SSH_COMMAND`, then `core.sshCommand` —
+  because a custom one is usually the identity that makes ssh work at all.
+- **Only the clone chooses.**
+  The url that won becomes the clone's origin,
+  so `update` and every `git -C` afterwards keep using it
+  without this tool remembering anything.
+
+When both fail, both are reported, each with what git said about it:
+"it failed" without saying which half failed how
+is the report that sends someone looking in the wrong place.
+
 `update` uses `pull --ff-only` and so **refuses on local modifications**.
 That is the point rather than a limitation —
 a change someone made to a hat is theirs —
@@ -860,6 +899,12 @@ example/           a hat that invents its data, and the config fixture
 | Cloned with git, not fetched as a tarball | `git diff` and `git log` keep working on an installed hat afterwards, which is how "what changed" is answered without this tool |
 | git is the second exception to no-shelling-out | go-git is a large dependency for four commands, and having git there afterwards is the reason a clone beats a tarball |
 | GitHub only | The same exception the cluster probe makes for kubectl: a hat cannot say where hats are found, and the topic search exists nowhere else |
+| ssh first, https as the fallback | A hat repository is as often private as not, and an ssh key is the credential people already have; https would want a token this tool will not prompt for |
+| ssh is offered only when ssh is on PATH | A capability probe, like the clipboard writer — showing a plan half of which cannot run is worse than showing one url |
+| The ssh attempt adds `BatchMode=yes` | `GIT_TERMINAL_PROMPT=0` does not reach ssh's own host-key and passphrase prompts; a transport that cannot work has to fail rather than wait, or the fallback never gets its turn |
+| A configured ssh command is extended, not replaced | It is usually the identity that makes ssh work at all, so overriding it would defeat the preference it expresses |
+| The url that won becomes origin | Update and every later `git -C` keep using it, so nothing has to remember which transport was chosen |
+| Both failures are reported together | "It failed" without saying which half failed how sends someone looking in the wrong place |
 | The store is flat, `owner-repo` | The path is what goes into `RINCEWIND_HAT`, and it has to be readable back out of a shell history |
 | `$RINCEWIND_HATS_DIR`, not `RINCEWIND_HATS` | One letter from `RINCEWIND_HAT` and a different meaning: one picks the hat, the other says where clones land |
 | No default hat beyond the variable | No config file, no symlink, no directory that doubles as a hat; the shell already scopes a variable to a project or a terminal |

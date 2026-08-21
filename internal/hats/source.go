@@ -11,8 +11,19 @@ import (
 
 // Source is a repository to install: where to clone it from, and what its
 // directory in the store is called.
+//
+// The same repository is named twice because it is reached two ways. SSH is
+// tried first: a hat repository is as often private as not, and an ssh key is
+// the credential people already have — where https would need a token this
+// tool will not ask for, since a prompt in a command nobody is watching is a
+// hang. https is what everyone can reach, so it is what the fall back is to.
 type Source struct {
+	// URL is the https spelling, and the one that needs no key.
 	URL string
+	// SSH is the same repository over ssh, or empty for a source that has no
+	// ssh spelling — a local path in a test. Empty means https is the only
+	// thing tried, so nothing has to special-case a one-transport source.
+	SSH string
 	// Slug is owner-repo, one flat directory name. Flat rather than nested:
 	// the path is what goes into RINCEWIND_HAT, and a person has to be able
 	// to read it back out of their own shell history.
@@ -61,6 +72,7 @@ func ParseSource(s string) (Source, error) {
 
 	return Source{
 		URL:  "https://github.com/" + owner + "/" + repo,
+		SSH:  "git@github.com:" + owner + "/" + repo + ".git",
 		Slug: owner + "-" + repo,
 	}, nil
 }

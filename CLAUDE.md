@@ -155,6 +155,12 @@ Both kinds of action open a tab; `esc` closes it.
 - **git and GitHub are named in Go only in `internal/hats`**,
   the second and third such exceptions after kubectl.
   git is probed on `PATH`; clones are full, never `--depth 1`.
+- **A clone is tried over ssh first, then https.**
+  ssh is offered only when it is on `PATH`, and the attempt carries
+  `BatchMode=yes` — a transport that cannot work must fail, not wait,
+  or the fallback never gets its turn.
+  `CloneURLs` is the one place that decides the order,
+  so what `install` prints is what it runs.
 - **`kubectl config current-context` is the one producer named in Go**,
   for the cluster shown top right, and nowhere else.
   Which cluster one is pointed at cannot come from the hat.
