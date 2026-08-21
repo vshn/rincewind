@@ -14,6 +14,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/vshn/rincewind/internal/engine"
 	"github.com/vshn/rincewind/internal/render"
@@ -543,9 +544,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			t.err = msg.err
 		}
 
-		if t.err != nil {
-			t.res = nil
-		} else {
+		// A run that failed replaces nothing. The rows from the last good
+		// one stay on screen, with the failure said under them and their
+		// age said beside them: one unreachable API server used to take a
+		// standing table away for a whole refresh interval, and a cancelled
+		// reload used to leave "nothing to show" behind without saying so.
+		//
+		// A view that has never produced anything has nothing to keep, and
+		// there the error still has the pane to itself.
+		if msg.err == nil {
 			res := msg.res
 			t.res, t.fetched = &res, time.Now()
 			t.prune()
@@ -901,11 +908,14 @@ func (m *model) viewActions() []engine.Action {
 }
 
 // hasTable reports whether the content box is showing rows, as opposed to a
-// job, a text view, a spinner, an error or a note that there is nothing to
-// see. Only rows get a sticky header and a row cursor.
+// job, a text view, a spinner or a note that there is nothing to see. Only
+// rows get a sticky header and a row cursor.
+//
+// A failed run does not disqualify them: rows that stand while their view is
+// unreachable are still rows, and are still what an action would act on.
 func (m *model) hasTable() bool {
 	t := m.cur()
-	return t.job == nil && t.err == nil && !t.running &&
+	return t.job == nil && !t.running &&
 		t.res != nil && !t.res.IsText() && m.rowCount() > 0
 }
 
@@ -914,7 +924,7 @@ func (m *model) hasText() bool {
 	t := m.cur()
 	// A followed view has lines while it is still running, which is the
 	// whole point; only an error hides them.
-	return t.job == nil && t.err == nil && t.res != nil && t.res.IsText() &&
+	return t.job == nil && t.res != nil && t.res.IsText() &&
 		(!t.running || t.stream != nil)
 }
 
@@ -922,7 +932,7 @@ func (m *model) hasText() bool {
 // view it has no rows, so the arrows scroll rather than moving a cursor.
 func (m *model) hasChart() bool {
 	t := m.cur()
-	return t.job == nil && t.err == nil && !t.running && t.res != nil && t.res.IsChart()
+	return t.job == nil && !t.running && t.res != nil && t.res.IsChart()
 }
 
 // statusLines is the room the status bar takes, so the viewport shrinks
@@ -1002,6 +1012,9 @@ func (m *model) showResult() {
 		if t := m.cur(); t.ended {
 			lines = append(append([]string{}, lines...), m.endMarker(t))
 		}
+		if note := m.staleNote(); len(note) > 0 {
+			lines = append(append([]string{}, lines...), note...)
+		}
 		m.setContent("", lines)
 		return
 	}
@@ -1016,6 +1029,7 @@ func (m *model) showResult() {
 		for _, note := range vis.Notes {
 			lines = append(lines, noteStyle.Render("! "+note))
 		}
+		lines = append(lines, m.staleNote()...)
 		m.setContent("", lines)
 		return
 	}
@@ -1036,6 +1050,7 @@ func (m *model) showResult() {
 	for _, note := range vis.Notes {
 		lines = append(lines, noteStyle.Render("! "+note))
 	}
+	lines = append(lines, m.staleNote()...)
 
 	m.setContent(head, lines)
 	m.followCursor(cursor)
@@ -1054,6 +1069,55 @@ func (m *model) setContent(head string, lines []string) {
 	for _, line := range lines {
 		m.widest = max(m.widest, lipgloss.Width(line))
 	}
+}
+
+// staleNote is the failed run said in full, under the rows it did not
+// replace. A script's stderr is most of what a failure is worth, so it goes
+// on screen whole rather than being cut to fit a status line — that one
+// carries the short marker of the same thing, which is the half that has to
+// stay visible from anywhere in a long table.
+//
+// Nothing to keep means nothing to note: there the error has the pane.
+func (m *model) staleNote() []string {
+	t := m.cur()
+	if t.err == nil || t.res == nil {
+		return nil
+	}
+
+	var out []string
+	for i, line := range strings.Split(strings.TrimRight(t.err.Error(), "\n"), "\n") {
+		prefix := "  "
+		if i == 0 {
+			prefix = "! "
+		}
+		out = append(out, errStyle.Render(prefix+line))
+	}
+	return out
+}
+
+// staleLabel says that what is on screen is not what the cluster last
+// answered, when it did, and what went wrong.
+//
+// It names the time of the last good run rather than an age: the TUI paints
+// on messages, not on a clock, so an age would stand still and lie between
+// two of them.
+//
+// Of the failure it takes the first line, cut to half the box. The rest of
+// the status line says what an action would act on — the filter, the
+// selection — and a script that printed twenty lines of stderr must not push
+// that off the edge. The whole of it stands under the rows.
+func (m *model) staleLabel() string {
+	t := m.cur()
+
+	label := "⚠ stale"
+	if !t.fetched.IsZero() {
+		label += " — from " + t.fetched.Format("15:04:05")
+	}
+	if t.err == nil {
+		return label
+	}
+	first, _, _ := strings.Cut(t.err.Error(), "\n")
+	return label + ": " + ansi.Truncate(first, max(m.contentWidth()/2, 20), "…")
 }
 
 // endMarker says why a followed view stopped producing.

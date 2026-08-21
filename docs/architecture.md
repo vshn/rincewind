@@ -714,6 +714,17 @@ Reversing that decision means answering it:
    the other columns and rows stay usable.
 3. **Script failures show the script's stderr**, not a Go stack:
    the script's own message is the useful one.
+4. **A failed run replaces nothing.**
+   A view that has produced rows keeps them:
+   the failure is said under them, in full,
+   and a marker on the status line names the time the rows are from.
+   Only a view that has never produced anything
+   gives the whole pane to the reason.
+   One unreachable API server used to take a standing table away
+   for a whole `refresh` interval,
+   and pressing `esc` mid-reload left an empty view behind without saying so.
+   The cost is that an action can act on rows that have gone stale;
+   the marker is what makes that a decision rather than a surprise.
 
 ## Results are data, not text
 
@@ -894,6 +905,7 @@ example/           a hat that invents its data, and the config fixture
 | `Run` returns data, never formatted strings | A string cannot be filtered, sorted or restyled |
 | One table renderer, styling after layout | Escape codes in cells misalign everything that measures naively |
 | Cell errors render `!err` + note, view survives | One broken expression must not take down 199 good rows |
+| A failed run keeps the last good rows, marked stale | A blip on a refreshing view would otherwise replace the answer with the reason for half a minute; what is on screen is worth more than the certainty that it is current, as long as the screen says which it is |
 | No shelling out to jq/column/… from Go | Each has a Go replacement; scripts in a hat may do what they like |
 | …except the clipboard | OSC 52 was that replacement and Terminal.app does not implement it; NSPasteboard needs cgo and the build is static, so the premise fails and the rule yields rather than the feature |
 | The clipboard writer is probed on PATH | A Mac without pbcopy and a Wayland session without wl-copy both exist; the platform name answers a different question |

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -21,6 +22,22 @@ func showing(t *testing.T) *model {
 	m.Update(key("enter"))
 	m.Update(resultMsg{seq: m.seq, res: engine.Result{Lines: logLines()}})
 	return m
+}
+
+// A log keeps what it has for the same reason a table does, and the failure
+// is said under the last line rather than in place of all of them.
+func TestAFailedRunKeepsTheLog(t *testing.T) {
+	m := showing(t)
+
+	m.Update(key("r"))
+	m.Update(resultMsg{seq: m.cur().seq, err: fmt.Errorf("pod is gone")})
+
+	content := ansi.Strip(m.View().Content)
+	for _, want := range []string{"indented continuation line", "pod is gone", "⚠ stale"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("the failed run does not leave %q on screen:\n%s", want, content)
+		}
+	}
 }
 
 // The point of the class: the lines arrive as the script wrote them.

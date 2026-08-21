@@ -74,6 +74,11 @@ Both kinds of action open a tab; `esc` closes it.
   Runtime cell errors render `!err` plus one note
   and never take down the view.
   Script failures surface the script's stderr.
+- **A failed run replaces nothing.**
+  A view that has rows keeps them, with the failure under them
+  and `⚠ stale — from <time>` on the status line;
+  only a view that has never produced anything
+  gives the pane to the error.
 - **Sort and emphasis work on raw jq values**, before formatting.
 - **A text view's lines are never reshaped.**
   No `oneLine`, no column padding, no truncation:

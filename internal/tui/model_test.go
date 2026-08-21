@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -145,6 +146,8 @@ func TestStaleResultIsIgnored(t *testing.T) {
 	}
 }
 
+// A view that has never produced anything has nothing to keep, so the
+// reason has the pane to itself.
 func TestErrorIsShown(t *testing.T) {
 	m := sized(t)
 	m.Update(key("enter"))
@@ -155,6 +158,68 @@ func TestErrorIsShown(t *testing.T) {
 	}
 	if !strings.Contains(m.View().Content, "timed out") {
 		t.Error("a deadline is not named as a timeout")
+	}
+}
+
+// One blip against the API server must not take a standing table away: the
+// rows stay, the failure is said under them, and the marker says they are
+// not what the cluster last answered.
+func TestAFailedRunKeepsTheRowsItCouldNotReplace(t *testing.T) {
+	m := loaded(t)
+	m.Update(key("tab"))
+	m.Update(key("space")) // worker-01
+
+	m.Update(key("r"))
+	m.Update(resultMsg{seq: m.cur().seq, err: fmt.Errorf("dial tcp: i/o timeout")})
+
+	content := ansi.Strip(m.View().Content)
+	if !strings.Contains(content, "worker-01") {
+		t.Fatalf("the rows went away with the failed run:\n%s", content)
+	}
+	for _, want := range []string{"dial tcp: i/o timeout", "⚠ stale"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("the failure does not say %q:\n%s", want, content)
+		}
+	}
+	if !m.cur().selection["worker-01"] {
+		t.Error("the selection was dropped by a run that changed no rows")
+	}
+
+	// The rows are still rows: the cursor moves over them, and the header
+	// is still painted onto the frame.
+	if !m.hasTable() {
+		t.Error("standing rows stopped counting as a table")
+	}
+
+	// Recovery: the next good run replaces everything and takes the marker
+	// with it.
+	m.Update(key("r"))
+	m.Update(resultMsg{seq: m.cur().seq, res: nodesTable()})
+
+	content = ansi.Strip(m.View().Content)
+	switch {
+	case strings.Contains(content, "⚠ stale"):
+		t.Error("the marker survived a good run")
+	case strings.Contains(content, "i/o timeout"):
+		t.Error("the failure survived a good run")
+	case !strings.Contains(content, "worker-01"):
+		t.Error("the good run did not land")
+	}
+}
+
+// Escape is a decision, not a failure — and not a reason to leave "nothing
+// to show" behind where a table was.
+func TestCancellingAReloadKeepsTheTable(t *testing.T) {
+	m := loaded(t)
+	m.Update(key("r"))
+	m.Update(resultMsg{seq: m.cur().seq, err: context.Canceled})
+
+	content := ansi.Strip(m.View().Content)
+	if !strings.Contains(content, "worker-01") {
+		t.Fatalf("a cancelled reload emptied the table:\n%s", content)
+	}
+	if strings.Contains(content, "⚠ stale") {
+		t.Error("being told to stop was reported as a failure")
 	}
 }
 

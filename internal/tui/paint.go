@@ -255,7 +255,9 @@ func (m *model) sidebarLines() []string {
 
 func (m *model) pane() string {
 	switch {
-	case m.cur().err != nil:
+	// A view that has produced nothing yet has nothing to show but the
+	// reason; one that has keeps its rows, and says so under them.
+	case m.cur().err != nil && m.cur().res == nil:
 		return errStyle.Render("error: " + m.cur().err.Error())
 
 	case m.cur().running && m.cur().stream != nil && m.shownCount() == 0:
@@ -280,10 +282,19 @@ func (m *model) pane() string {
 	return m.vp.View()
 }
 
-// statusLine shows the filter and the selection: the two pieces of state
-// that change what a later action would operate on.
+// statusLine shows the filter and the selection — the two pieces of state
+// that change what a later action would operate on — and, before them, the
+// marker saying that the rows they apply to are older than the last attempt
+// to fetch them.
 func (m *model) statusLine() string {
 	var parts []string
+
+	// First, because it is the one thing on this line that must not be
+	// pushed past the right edge by a long filter or notice: rows nobody
+	// knows are old are worse than no rows.
+	if t := m.cur(); t.err != nil && t.res != nil {
+		parts = append(parts, errStyle.Render(m.staleLabel()))
+	}
 
 	if m.filtering {
 		parts = append(parts, m.filter.View())
