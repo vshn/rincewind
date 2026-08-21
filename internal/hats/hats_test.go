@@ -138,6 +138,27 @@ func TestCloneURLsPreferSSH(t *testing.T) {
 	}
 }
 
+// Which transport a url names decides whether BatchMode is put in front of
+// it, so an https url that happens to carry userinfo must not read as ssh.
+func TestIsSSH(t *testing.T) {
+	cases := []struct {
+		url  string
+		want bool
+	}{
+		{"ssh://git@github.com/vshn/rincewind-hats.git", true},
+		{"git@github.com:vshn/rincewind-hats.git", true},
+		{"https://github.com/vshn/rincewind-hats", false},
+		{"http://github.com/vshn/rincewind-hats", false},
+		{"https://user@github.com/vshn/a:b", false},
+		{"/tmp/a-local-clone", false},
+	}
+	for _, tc := range cases {
+		if got := isSSH(tc.url); got != tc.want {
+			t.Errorf("isSSH(%q) = %v, want %v", tc.url, got, tc.want)
+		}
+	}
+}
+
 // A source with one url — a local path, as the tests clone from — is tried
 // once and reported as itself, with no talk of a transport it never had.
 func TestCloneFromASingleURL(t *testing.T) {
