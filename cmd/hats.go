@@ -11,8 +11,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/vshn/rincewind/internal/config"
+	"github.com/vshn/rincewind/internal/engine"
 	"github.com/vshn/rincewind/internal/hats"
-	"github.com/vshn/rincewind/internal/render"
 )
 
 // hatsDirFlag overrides where the store lives.
@@ -243,7 +243,7 @@ func report(out io.Writer, c hats.Clone) error {
 			continue
 		}
 		ok++
-		say(out, "  %-14s %-10s %s\n", h.Name, render.Plural(len(views), "view"), short(h.Path))
+		say(out, "  %-14s %-10s %s\n", h.Name, engine.Plural(len(views), "view"), short(h.Path))
 	}
 	if ok == 0 {
 		return fmt.Errorf("no hat in %s loads", c.Slug)
@@ -281,17 +281,23 @@ var (
 	confirmRd *bufio.Reader
 )
 
-// confirm asks, unless --yes said not to. Anything but y is no, and so is a
-// closed stdin: a pipe that cannot answer has not agreed to anything.
+// confirm asks on this command's own output, unless --yes said not to.
 func confirm(cmd *cobra.Command, question string) bool {
 	if yesFlag {
 		return true
 	}
-	say(cmd.OutOrStdout(), "%s [y/N] ", question)
+	return ask(cmd.OutOrStdout(), cmd.InOrStdin(), question)
+}
 
-	line, err := reader(cmd.InOrStdin()).ReadString('\n')
+// ask puts the question where the caller wants it and reads the answer.
+// Anything but y is no, and so is a closed stdin: a pipe that cannot answer
+// has not agreed to anything.
+func ask(w io.Writer, in io.Reader, question string) bool {
+	say(w, "%s [y/N] ", question)
+
+	line, err := reader(in).ReadString('\n')
 	if err != nil && line == "" {
-		say(cmd.OutOrStdout(), "\n")
+		say(w, "\n")
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(line), "y")

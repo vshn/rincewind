@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/vshn/rincewind/internal/engine"
 	"github.com/vshn/rincewind/internal/render"
 )
 
@@ -65,12 +66,12 @@ func (m *model) copyLines() (lines []string, what string) {
 		for _, line := range t.job.lines("") {
 			lines = append(lines, strings.TrimRight(ansi.Strip(line), " \t"))
 		}
-		return lines, render.Plural(len(lines), "line")
+		return lines, engine.Plural(len(lines), "line")
 	}
 
 	vis := m.visible()
 	if vis.IsText() {
-		return vis.Lines, render.Plural(len(vis.Lines), "line")
+		return vis.Lines, engine.Plural(len(vis.Lines), "line")
 	}
 
 	// A chart copies as it shows — the braille plot with its legend — drawn
@@ -80,7 +81,7 @@ func (m *model) copyLines() (lines []string, what string) {
 		for _, line := range render.Chart(vis, m.contentWidth(), m.vpHeight(), false) {
 			lines = append(lines, strings.TrimRight(line, " "))
 		}
-		return lines, render.Plural(len(lines), "line")
+		return lines, engine.Plural(len(lines), "line")
 	}
 
 	rows := vis.Rows
@@ -100,7 +101,7 @@ func (m *model) copyLines() (lines []string, what string) {
 	// The header comes along: a table of values whose columns are unnamed is
 	// a table one has to remember the shape of.
 	vis.Rows = rows
-	return render.Table(vis, render.Style{}), render.Plural(len(rows), "row")
+	return render.Table(vis, render.Style{}), engine.Plural(len(rows), "row")
 }
 
 // clipboardTools are the local clipboard writers, in the order they are

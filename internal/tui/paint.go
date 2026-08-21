@@ -8,7 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/vshn/rincewind/internal/render"
+	"github.com/vshn/rincewind/internal/engine"
 )
 
 // Painting: everything that turns the model into lines on screen. Nothing
@@ -108,7 +108,7 @@ func (m *model) titleLine() string {
 				descStyle.Render(j.action.Short))
 		}
 		return m.withCluster(name + sep + titleStyle.Render(j.action.Name) + sep +
-			descStyle.Render(render.Plural(len(j.steps), "step")))
+			descStyle.Render(engine.Plural(len(j.steps), "step")))
 	}
 	cur := m.cur().view
 	if cur == nil {
