@@ -727,6 +727,9 @@ func (m *model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.fire(a)
 	}
 
+	// Every key answered below is listed in boundKeys, which a test holds
+	// against config's reserved set. Adding a case here means adding it
+	// there.
 	switch key {
 	case "q", "ctrl+c":
 		m.stopAll()
@@ -842,6 +845,20 @@ func (m *model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.vp, cmd = m.vp.Update(msg)
 	return m, cmd
+}
+
+// boundKeys is what the switch in onKey answers, written out because a
+// switch cannot be read by a test. Config's reserved set is the other half
+// of the contract: everything here is refused to a hat, except enter, which
+// is deliberately left free — in the output pane it means nothing else, so a
+// view may bind it as its one obvious action.
+//
+// Keep this beside the switch, in both directions.
+var boundKeys = []string{
+	"q", "ctrl+c", "/", "tab", "<", ">", "esc",
+	"up", "k", "down", "j", "pgdown", "ctrl+f", "pgup", "ctrl+b",
+	"home", "g", "end", "G", "r", "Y", "enter", "space", " ", "a", "M",
+	"]", "[", "shift+tab", "x",
 }
 
 // The mouse acts on what it points at, not on what has the keyboard: the
