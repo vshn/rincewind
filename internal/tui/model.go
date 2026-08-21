@@ -1175,12 +1175,8 @@ func (m *model) launch(t *tab) tea.Cmd {
 		return m.follow(t)
 	}
 
-	t.stop()
-	m.seq++
-	t.seq, t.running, t.err = m.seq, true, nil
-
-	ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
-	t.cancel = cancel
+	t.err = nil
+	ctx, cancel, tick := m.begin(t, runTimeout)
 
 	seq, view, args := t.seq, t.view, t.args
 	run := func() tea.Msg {
@@ -1188,14 +1184,49 @@ func (m *model) launch(t *tab) tea.Cmd {
 		res, err := view.Run(ctx, args)
 		return resultMsg{seq: seq, res: res, err: err}
 	}
+	return withTick(run, tick)
+}
 
-	// Only one tick chain at a time, otherwise the spinner speeds up with
-	// every run.
+// begin puts a tab into the running state and hands back the context its
+// work runs under: a superseded run is cancelled, the sequence number moves
+// on so nothing it still sends finds a tab, and the tab remembers its cancel
+// so leaving or closing it stops the script.
+//
+// A timeout of zero means no deadline — the followed case, which is never
+// finished and would be cut off by runTimeout.
+//
+// The returned command is the spinner's first tick, or nil when a chain is
+// already alive: two chains make the spinner turn twice as fast.
+func (m *model) begin(t *tab, timeout time.Duration) (context.Context, context.CancelFunc, tea.Cmd) {
+	t.stop()
+	m.seq++
+	t.seq, t.running = m.seq, true
+
+	var (
+		ctx    context.Context
+		cancel context.CancelFunc
+	)
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+	} else {
+		ctx, cancel = context.WithCancel(context.Background())
+	}
+	t.cancel = cancel
+
 	if m.tickAlive {
-		return run
+		return ctx, cancel, nil
 	}
 	m.tickAlive = true
-	return tea.Batch(run, m.spin.Tick)
+	return ctx, cancel, m.spin.Tick
+}
+
+// withTick batches the work with the spinner tick begin handed out, if it
+// handed out one at all.
+func withTick(run tea.Cmd, tick tea.Cmd) tea.Cmd {
+	if tick == nil {
+		return run
+	}
+	return tea.Batch(run, tick)
 }
 
 // scheduleRefresh arms the auto-reload of a view that asked for one. Only

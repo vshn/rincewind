@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"context"
-
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/vshn/rincewind/internal/engine"
@@ -17,18 +15,19 @@ const maxFollowLines = 5000
 // run: the whole point is that it does not finish, and runTimeout would cut
 // it off after half a minute.
 func (m *model) follow(t *tab) tea.Cmd {
-	t.stop()
-	m.seq++
-	t.seq, t.running, t.err = m.seq, true, nil
+	t.err = nil
 	t.ended, t.stopped, t.endErr = false, false, nil
-
-	ctx, cancel := context.WithCancel(context.Background())
-	t.cancel = cancel
+	ctx, cancel, tick := m.begin(t, 0)
 
 	ch, err := t.view.Stream(ctx, t.args)
 	if err != nil {
 		cancel()
 		t.running, t.err = false, err
+		// Nothing runs, so the chain this run would have started never
+		// begins; leaving the flag set would keep the next one from ticking.
+		if tick != nil {
+			m.tickAlive = false
+		}
 		m.showResult()
 		return nil
 	}
@@ -39,7 +38,7 @@ func (m *model) follow(t *tab) tea.Cmd {
 	t.res, t.stream = &res, ch
 
 	m.showResult()
-	return m.readChunk(t.seq, ch)
+	return withTick(m.readChunk(t.seq, ch), tick)
 }
 
 // readChunk waits for the next lines and re-arms itself, which is how a

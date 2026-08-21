@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -195,12 +194,7 @@ func (m *model) drill(a *engine.Action) tea.Cmd {
 // work runs a job tab's steps, in order, and brings back what each printed.
 // One step per row means a failure is attributable and the rest still run.
 func (m *model) work(t *tab) tea.Cmd {
-	t.stop()
-	m.seq++
-	t.seq, t.running = m.seq, true
-
-	ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
-	t.cancel = cancel
+	ctx, cancel, tick := m.begin(t, runTimeout)
 
 	seq, steps := t.seq, t.job.steps
 	run := func() tea.Msg {
@@ -216,12 +210,7 @@ func (m *model) work(t *tab) tea.Cmd {
 		}
 		return jobMsg{seq: seq, out: out, errs: errs}
 	}
-
-	if m.tickAlive {
-		return run
-	}
-	m.tickAlive = true
-	return tea.Batch(run, m.spin.Tick)
+	return withTick(run, tick)
 }
 
 // selectedRows is what a working action operates on: the marked rows, in the

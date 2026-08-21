@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/vshn/rincewind/internal/engine"
@@ -85,6 +86,37 @@ func send(m *model, k string) {
 // that would have read them off the channel.
 func chunk(m *model, lines ...string) {
 	m.Update(chunkMsg{seq: m.cur().seq, lines: lines})
+}
+
+// "following…" is painted with a spinner beside it, and a spinner only turns
+// while a tick chain is alive — which starting a stream has to see to.
+func TestFollowStartsTheSpinnerTick(t *testing.T) {
+	rec := &streamRec{}
+	m := newModel(followViews(rec))
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 96, Height: 20})
+	m = next.(*model)
+
+	m.Update(key("enter"))
+	deliver(t, m, engine.Result{
+		Cols: []string{"NAME"},
+		Rows: []engine.Row{row("api"), row("worker")},
+	})
+
+	// The table's own run started a chain; with nothing running any more the
+	// next tick retires it. That is the state a drill-down starts from.
+	m.Update(spinner.TickMsg{})
+	if m.tickAlive {
+		t.Fatal("a tick with nothing running left the chain alive")
+	}
+
+	m.Update(key("tab"))
+	m.Update(key("enter")) // the drill-down action
+	if m.cur().stream == nil {
+		t.Fatal("drilling into a followed view started no stream")
+	}
+	if !m.tickAlive {
+		t.Error("following started no tick chain, so the spinner stands still")
+	}
 }
 
 // The point of following: lines show up as they are produced, not when the
