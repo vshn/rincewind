@@ -1,5 +1,12 @@
 # rincewind
 
+> [!WARNING]
+> This tool is written with AI, the code is partially vetted by a human.
+> All commands interacting with a cluster or other system are defined in Hats,
+> the tool itself does not contain any code that runs against external systems.
+> The exception to the rule are interactions with Github,
+> for searching and downloading Hats.
+
 Config-driven cluster diagnostic TUI.
 Views are pulled out of a **hat**: a directory of YAML files.
 Each view runs a script,
