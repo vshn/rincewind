@@ -100,6 +100,9 @@ Both kinds of action open a tab; `esc` closes it.
   time**, naming view and action —
   including an `open` target that does not exist
   and an argument the target does not declare.
+- **The menu wraps at both ends, the table never does.**
+  Only single steps, not paging: the menu is short and visible whole,
+  a long table is not.
 - **Each tab owns its state**;
   `m.cur()` is the tab on screen, `m.selected()` the sidebar's cursor.
   They are not the same view after a drill-down.

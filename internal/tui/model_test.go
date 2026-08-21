@@ -75,15 +75,19 @@ func TestNavigationSkipsGroupHeaders(t *testing.T) {
 		t.Fatalf("after down: %q, want demo.nodes", got)
 	}
 
-	// Past the end the cursor must hold, not wrap onto a header.
+	// Past the end it comes round to the first view — never onto the header
+	// that sits above it.
 	m.Update(key("down"))
-	if got := m.selected().ID; got != "demo.nodes" {
-		t.Fatalf("after second down: %q, want demo.nodes", got)
+	if got := m.selected().ID; got != "demo.quick" {
+		t.Fatalf("after second down: %q, want it wrapped to demo.quick", got)
+	}
+	if m.entries[m.cursor].view == nil {
+		t.Fatal("the cursor landed on a group header")
 	}
 
 	m.Update(key("up"))
-	if got := m.selected().ID; got != "demo.quick" {
-		t.Fatalf("after up: %q, want demo.quick", got)
+	if got := m.selected().ID; got != "demo.nodes" {
+		t.Fatalf("after up: %q, want it wrapped back to demo.nodes", got)
 	}
 }
 
@@ -312,5 +316,65 @@ func TestRefreshingViewSchedulesATick(t *testing.T) {
 	m.Update(refreshMsg{seq: m.seq})
 	if !m.cur().running {
 		t.Fatal("the tick did not re-run the view")
+	}
+}
+
+// The menu is a ring: it is short and visible whole, so the far end is
+// nearer than the way back.
+func TestMenuWrapsAround(t *testing.T) {
+	m := newModel(manyViews())
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 96, Height: 20})
+	m = next.(*model)
+
+	first := m.cursor
+	m.Update(key("up"))
+	last := m.cursor
+	if last == first {
+		t.Fatal("up on the first entry stayed put")
+	}
+	if m.entries[last].view == nil {
+		t.Error("it wrapped onto a group header")
+	}
+
+	m.Update(key("down"))
+	if m.cursor != first {
+		t.Errorf("down from the last entry went to %d, want back to %d", m.cursor, first)
+	}
+}
+
+// A page that wrapped would land in the middle after running off the end,
+// which reads as a miss rather than as coming round.
+func TestPagingStopsAtTheEnds(t *testing.T) {
+	m := newModel(manyViews())
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 96, Height: 20})
+	m = next.(*model)
+
+	m.Update(key("pgup"))
+	if got := m.cursor; got != m.next(-1, +1) {
+		t.Errorf("pgup from the top moved to %d", got)
+	}
+
+	m.Update(key("end"))
+	last := m.cursor
+	m.Update(key("pgdown"))
+	if m.cursor != last {
+		t.Errorf("pgdown from the bottom moved to %d, want it to stay at %d", m.cursor, last)
+	}
+}
+
+// The row cursor is not a ring: a table is not visible whole, and losing
+// one's place in two hundred rows is not a shortcut.
+func TestRowCursorDoesNotWrap(t *testing.T) {
+	m := copying(t) // a table with four rows, output pane focused
+
+	m.Update(key("up"))
+	if m.cur().row != 0 {
+		t.Errorf("up from the first row went to %d", m.cur().row)
+	}
+	m.Update(key("end"))
+	last := m.cur().row
+	m.Update(key("down"))
+	if m.cur().row != last {
+		t.Errorf("down from the last row went to %d, want it to stay at %d", m.cur().row, last)
 	}
 }

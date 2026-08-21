@@ -699,6 +699,15 @@ example/           a hat that invents its data, and the config fixture
   Both panes scroll:
   the viewport follows the row cursor to the edge rather than recentring,
   and the sidebar windows onto the menu the same way.
+- **The menu is a ring; the table is not.**
+  A single step off either end of the menu comes round to the other,
+  because the menu is short and visible whole,
+  so the far end is nearer than the way back.
+  Neither paging nor the row cursor wraps:
+  a page that came round would land in the middle after running off the end,
+  which reads as a miss;
+  and a table of two hundred rows is not visible whole,
+  so losing one's place in it is not a shortcut.
 - The key legend is weighted:
   when the footer box is too narrow the lightest keys are dropped
   rather than the line being clipped mid-word.
