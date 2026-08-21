@@ -20,6 +20,13 @@ func runScript(ctx context.Context, shell []string, script string, env Args, std
 	argv := append(append([]string{}, shell...), script)
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	// The script is `sh -c …`, and sh forks the members of a pipeline rather
+	// than exec-ing them. Killing sh on cancel orphans those children with
+	// the pipes still open, and Wait would sit on the pipe copies for as long
+	// as the orphans live. WaitDelay bounds that: after the exit or the
+	// cancel, the pipes are forced closed — which also hands any orphan
+	// still writing an EPIPE instead of a silent forever.
+	cmd.WaitDelay = pipeGrace
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 
