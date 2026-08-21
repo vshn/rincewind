@@ -103,7 +103,10 @@ views:
           # A rowless action's env works from $args, which is how a value is
           # derived before the command is shown.
           reference: '"\($args.service):\($args.image)"'
-        confirm: '"Deploy \($args.reference)"'
+        # $args is what was collected, not what env derived from it: the two
+        # are evaluated separately, so a question asking for $args.reference
+        # would be asking for something that does not exist yet.
+        confirm: '"Deploy \($args.service):\($args.image)"'
         script: echo "deployed $reference"
 
   # Needs a service, so it cannot be started from the menu — it is reached by

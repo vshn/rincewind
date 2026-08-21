@@ -206,6 +206,18 @@ func TestHatDemoActionsPlanWhatTheyWouldRun(t *testing.T) {
 	if steps[0].Stdin == nil {
 		t.Error("the rowless step left stdin attached to the terminal")
 	}
+
+	// The question names what is about to be deployed. It reads $args, which
+	// holds what was collected — never what env derived from it, since the
+	// two are evaluated apart. A confirmation that says "null" is the bug
+	// this covers.
+	asked, err := deploy.Confirm(nil, bound)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asked != "Deploy api:latest" {
+		t.Errorf("the question is %q, want it to name the image", asked)
+	}
 }
 
 // Actions run: the steps are what actually execute, and say what they did.

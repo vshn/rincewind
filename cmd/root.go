@@ -127,7 +127,7 @@ func init() {
 	// how one is chosen for good.
 	rootCmd.PersistentFlags().StringVar(&hatFlag, "hat", "",
 		"directory the views are pulled out of (default $"+envHat+")")
-	rootCmd.AddCommand(checkCmd, versionCmd, viewCmd, hatsCmd)
+	rootCmd.AddCommand(checkCmd, versionCmd, viewCmd, actCmd, hatsCmd)
 }
 
 // Execute runs the root command. Errors are printed by cobra; printing them
