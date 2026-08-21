@@ -436,8 +436,11 @@ func (m *model) rowCount() int { return len(m.visible().Rows) }
 // filter's count and "nothing to show" mean the same thing either way.
 func (m *model) shownCount() int {
 	vis := m.visible()
-	if vis.Text() {
+	switch {
+	case vis.Text():
 		return len(vis.Lines)
+	case vis.Chart():
+		return len(vis.Series)
 	}
 	return len(vis.Rows)
 }
@@ -450,6 +453,8 @@ func (m *model) total() int {
 		return 0
 	case t.res.Text():
 		return len(t.res.Lines)
+	case t.res.Chart():
+		return len(t.res.Series)
 	default:
 		return len(t.res.Rows)
 	}
@@ -953,8 +958,9 @@ func (m *model) move(step int) {
 	}
 
 	// A text view has no row to move: the keys scroll it, which is what one
-	// wants from a log anyway.
-	if m.hasText() {
+	// wants from a log anyway. A chart is the same — only its notes and
+	// legend can even reach past the pane.
+	if m.hasText() || m.hasChart() {
 		if step < 0 {
 			m.vp.ScrollUp(-step)
 		} else {
@@ -996,7 +1002,7 @@ func (m *model) jump(dir int) {
 		return
 	}
 
-	if m.hasText() {
+	if m.hasText() || m.hasChart() {
 		if dir < 0 {
 			m.vp.GotoTop()
 		} else {
@@ -1353,6 +1359,13 @@ func (m *model) hasText() bool {
 		(!t.running || t.stream != nil)
 }
 
+// hasChart reports whether the content box is showing a chart. Like a text
+// view it has no rows, so the arrows scroll rather than moving a cursor.
+func (m *model) hasChart() bool {
+	t := m.cur()
+	return t.job == nil && t.err == nil && !t.running && t.res != nil && t.res.Chart()
+}
+
 // statusLines is the room the status bar takes, so the viewport shrinks
 // rather than pushing rows out of the frame.
 func (m *model) statusLines() int {
@@ -1380,6 +1393,18 @@ func filtered(t engine.Result, needle string) engine.Result {
 		for _, line := range t.Lines {
 			if strings.Contains(strings.ToLower(line), needle) {
 				out.Lines = append(out.Lines, line)
+			}
+		}
+		return out
+	}
+
+	// Filtering a chart picks series by name: /worker keeps the workers'
+	// lines and drops the rest, which is how one node is read out of a pool.
+	if t.Chart() {
+		out := engine.Result{Series: []engine.Series{}, Notes: t.Notes, YRange: t.YRange}
+		for _, s := range t.Series {
+			if strings.Contains(strings.ToLower(s.Name), needle) {
+				out.Series = append(out.Series, s)
 			}
 		}
 		return out
@@ -1424,6 +1449,22 @@ func (m *model) showResult() {
 		// away — so it is said under the last line rather than swallowed.
 		if t := m.cur(); t.ended {
 			lines = append(append([]string{}, lines...), m.endMarker(t))
+		}
+		m.head = ""
+		m.vp.SetContentLines(lines)
+		m.lines = len(lines)
+		return
+	}
+
+	// A chart is drawn to the pane's size, so resizing re-renders it here.
+	// Notes ride below it, exactly as they do under a table.
+	if vis.Chart() {
+		var lines []string
+		if len(vis.Series) > 0 {
+			lines = render.Chart(vis, m.contentWidth(), m.vpHeight(), true)
+		}
+		for _, note := range vis.Notes {
+			lines = append(lines, noteStyle.Render("! "+note))
 		}
 		m.head = ""
 		m.vp.SetContentLines(lines)
@@ -1640,7 +1681,7 @@ func (m *model) contentLines() []string {
 	case m.hasTable():
 		lines = append(lines, m.headLine())
 		lines = append(lines, strings.Split(m.vp.View(), "\n")...)
-	case m.hasText() && m.shownCount() > 0:
+	case (m.hasText() || m.hasChart()) && m.shownCount() > 0:
 		// No sticky header: there are no column names to keep.
 		lines = strings.Split(m.vp.View(), "\n")
 	default:
@@ -1770,6 +1811,10 @@ func (m *model) statusLine() string {
 // scrollable reports whether anything reaches past the right edge, so the
 // help only offers the keys that would do something.
 func (m *model) scrollable() bool {
+	// A chart is drawn to the pane's width; there is never more to the right.
+	if m.hasChart() {
+		return false
+	}
 	if m.vp.XOffset() > 0 {
 		return true
 	}

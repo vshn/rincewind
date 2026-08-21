@@ -164,8 +164,53 @@ func TestBrokenActionsFailWithContext(t *testing.T) {
 		},
 		{
 			name: "unknown class",
-			yaml: strings.Replace(valid, "    rows: .items[]", "    class: chart\n    rows: .items[]", 1),
-			want: []string{"demo.list", "chart", "table or text"},
+			yaml: strings.Replace(valid, "    rows: .items[]", "    class: pie\n    rows: .items[]", 1),
+			want: []string{"demo.list", "pie", "table, text or chart"},
+		},
+		{
+			name: "chart view with columns",
+			yaml: strings.Replace(valid, "    key: .name\n", "    class: chart\n", 1),
+			want: []string{"demo.list", "columns are not read"},
+		},
+		{
+			name: "chart view with key",
+			yaml: strings.Replace(chart, "    rows: .", "    rows: .\n    key: .name", 1),
+			want: []string{"demo.load", "key is not read"},
+		},
+		{
+			name: "chart view with sort",
+			yaml: strings.Replace(chart, "    rows: .", "    rows: .\n    sort: [{by: X}]", 1),
+			want: []string{"demo.load", "sort is not read"},
+		},
+		{
+			name: "chart view without rows",
+			yaml: strings.Replace(chart, "    rows: .\n", "", 1),
+			want: []string{"demo.load", "rows"},
+		},
+		{
+			name: "follow on a chart",
+			yaml: strings.Replace(chart, "    class: chart", "    class: chart\n    follow: true", 1),
+			want: []string{"demo.load", "follow needs class: text"},
+		},
+		{
+			name: "yrange on a table",
+			yaml: strings.Replace(valid, "key: .name", "key: .name\n    yrange: [0, 100]", 1),
+			want: []string{"demo.list", "yrange belongs to class chart"},
+		},
+		{
+			name: "yrange with one number",
+			yaml: strings.Replace(chart, "yrange: [0, 100]", "yrange: [100]", 1),
+			want: []string{"demo.load", "two numbers"},
+		},
+		{
+			name: "yrange upside down",
+			yaml: strings.Replace(chart, "yrange: [0, 100]", "yrange: [100, 0]", 1),
+			want: []string{"demo.load", "not below"},
+		},
+		{
+			name: "chart action that navigates",
+			yaml: strings.Replace(chart, "        scope: none\n", "", 1),
+			want: []string{"demo.load", "refit", "scope: none"},
 		},
 		{
 			name: "unknown scope",

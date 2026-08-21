@@ -1,0 +1,44 @@
+# A chart view: the stream becomes series to draw rather than rows to list.
+# Each value the `rows` expression yields must be a series object,
+#
+#   {"name": "worker-01", "points": [[<unix seconds or RFC 3339>, <number>], …]}
+#
+# which is exactly what a Prometheus query_range response reduces to in one
+# jq step — string-encoded samples included, the engine reads those too:
+#
+#   rows: .data.result[] | {name: .metric.instance, points: .values}
+#
+# Series are drawn in the order the script emits them, later ones on top.
+# That is why this script prints the max series first and the avg second: the
+# spikes lie under the line that tells the trend. There is no selection and
+# no cursor row — `/` filters series by name, and actions need scope: none.
+
+views:
+  - id: demo.load
+    title: One service's load, over a day
+    class: chart
+    # The value axis is fixed rather than fitted: load is a bounded quantity,
+    # and two charts of it should read against the same scale. Leave yrange
+    # out to scale the axis to the data instead.
+    yrange: [0, 100]
+    params:
+      - name: service
+        short: service name
+        default: api
+    source:
+      # awk rather than jq for the arithmetic, and integer values on purpose:
+      # printf %f writes a decimal comma in some locales, which is not JSON.
+      script: |
+        awk -v svc="$service" 'BEGIN {
+          t0 = 1755648000
+          for (i = 0; i < 96; i++) {
+            v = 45 + 25 * sin(i / 7)
+            if (i >= 60 && i < 63) v = 97   # the spike a max series exists for
+            sep = (i ? "," : "")
+            mx  = mx  sprintf("%s[%d,%d]", sep, t0 + i * 900, int(v))
+            avg = avg sprintf("%s[%d,%d]", sep, t0 + i * 900, int(v * 0.6))
+          }
+          printf "{\"name\":\"%s max\",\"points\":[%s]}\n", svc, mx
+          printf "{\"name\":\"%s avg\",\"points\":[%s]}\n", svc, avg
+        }'
+    rows: .

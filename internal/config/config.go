@@ -27,18 +27,19 @@ type file struct {
 }
 
 type view struct {
-	ID      string   `yaml:"id"`
-	Title   string   `yaml:"title"`
-	Class   string   `yaml:"class"`
-	Refresh string   `yaml:"refresh"`
-	Follow  bool     `yaml:"follow"`
-	Params  []param  `yaml:"params"`
-	Source  source   `yaml:"source"`
-	Rows    string   `yaml:"rows"`
-	Key     string   `yaml:"key"`
-	Columns []column `yaml:"columns"`
-	Sort    []sortBy `yaml:"sort"`
-	Actions []action `yaml:"actions"`
+	ID      string    `yaml:"id"`
+	Title   string    `yaml:"title"`
+	Class   string    `yaml:"class"`
+	Refresh string    `yaml:"refresh"`
+	Follow  bool      `yaml:"follow"`
+	Params  []param   `yaml:"params"`
+	Source  source    `yaml:"source"`
+	Rows    string    `yaml:"rows"`
+	Key     string    `yaml:"key"`
+	Columns []column  `yaml:"columns"`
+	Sort    []sortBy  `yaml:"sort"`
+	YRange  []float64 `yaml:"yrange"`
+	Actions []action  `yaml:"actions"`
 }
 
 type source struct {
@@ -224,7 +225,8 @@ func toDef(v view) (engine.Def, error) {
 
 	// A text view shapes nothing, so the fields that do the shaping are not
 	// merely optional there — they are refused, because a `rows:` nothing
-	// reads is a misunderstanding worth naming rather than ignoring.
+	// reads is a misunderstanding worth naming rather than ignoring. A chart
+	// shapes series with rows, and refuses the rest the same way.
 	switch v.Class {
 	case "", "table":
 	case "text":
@@ -238,8 +240,29 @@ func toDef(v view) (engine.Def, error) {
 		case v.Key != "":
 			return fail("class text has no rows, so key is not read")
 		}
+	case "chart":
+		switch {
+		case len(v.Columns) > 0:
+			return fail("class chart draws series, so columns are not read")
+		case len(v.Sort) > 0:
+			return fail("class chart draws series in the order the script produced them, so sort is not read")
+		case v.Key != "":
+			return fail("class chart has no rows to select, so key is not read")
+		}
 	default:
-		return fail("class %q is not supported; use table or text", v.Class)
+		return fail("class %q is not supported; use table, text or chart", v.Class)
+	}
+
+	// The value axis is a chart's alone, and half a range is a mistake.
+	if len(v.YRange) > 0 {
+		switch {
+		case v.Class != "chart":
+			return fail("yrange belongs to class chart")
+		case len(v.YRange) != 2:
+			return fail("yrange needs two numbers, low then high")
+		case v.YRange[0] >= v.YRange[1]:
+			return fail("yrange low %v is not below high %v", v.YRange[0], v.YRange[1])
+		}
 	}
 
 	// Following is consuming the output as it is written, which only makes
@@ -256,11 +279,15 @@ func toDef(v view) (engine.Def, error) {
 		ID:     v.ID,
 		Title:  v.Title,
 		Text:   v.Class == "text",
+		Chart:  v.Class == "chart",
 		Follow: v.Follow,
 		Shell:  v.Source.Shell,
 		Script: v.Source.Script,
 		Rows:   v.Rows,
 		Key:    v.Key,
+	}
+	if len(v.YRange) == 2 {
+		d.YRange = &[2]float64{v.YRange[0], v.YRange[1]}
 	}
 
 	if v.Refresh != "" {
@@ -333,11 +360,11 @@ func toDef(v view) (engine.Def, error) {
 			return fail("an action has no name")
 		}
 
-		// A text view has no rows, so nothing can act on one: no cursor row
-		// to navigate from, no selection to work on. What is left is an
-		// action that acts on nothing.
-		if d.Text && (a.Open != "" || a.Scope != engine.ScopeNone) {
-			return fail("action %s: a text view has no rows, so its actions need scope: none", a.Name)
+		// A text or chart view has no rows, so nothing can act on one: no
+		// cursor row to navigate from, no selection to work on. What is left
+		// is an action that acts on nothing.
+		if (d.Text || d.Chart) && (a.Open != "" || a.Scope != engine.ScopeNone) {
+			return fail("action %s: a %s view has no rows, so its actions need scope: none", a.Name, v.Class)
 		}
 		if actNames[a.Name] {
 			return fail("action %s: declared twice", a.Name)

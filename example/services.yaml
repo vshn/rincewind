@@ -66,6 +66,14 @@ views:
         args:
           service: .name
 
+      # A chart is a normal `open` target: drill-down carries the name over.
+      - key: m
+        name: load
+        short: Chart this service's load
+        open: demo.load
+        args:
+          service: .name
+
       # Works on the selection, once per row, and asks first.
       - key: t
         name: restart

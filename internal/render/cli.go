@@ -30,11 +30,21 @@ func CLI(w io.Writer, res engine.Result) error {
 	return cli(w, res, Colour(w))
 }
 
+// The CLI has no pane to measure a chart against, so it gets a fixed one:
+// wide enough for a week of braille, short enough for a terminal.
+const (
+	cliChartWidth  = 100
+	cliChartHeight = 20
+)
+
 // cli takes the styling decision as an argument so the tests can exercise the
 // styled path against an ordinary buffer.
 func cli(w io.Writer, res engine.Result, colour bool) error {
 	lines := res.Lines
-	if !res.Text() {
+	switch {
+	case res.Chart():
+		lines = Chart(res, cliChartWidth, cliChartHeight, colour)
+	case !res.Text():
 		style := Style{}
 		if colour {
 			style = Style{Header: func(s string) string { return cliHeader.Render(s) }, Cell: cliCell}

@@ -277,3 +277,30 @@ func TestHatDemoTextViewKeepsItsLines(t *testing.T) {
 		t.Errorf("line 4 is %q, want its leading whitespace kept", got)
 	}
 }
+
+// A chart view's stream becomes series, in the order the script emits them —
+// max first, so the avg line is drawn on top of it.
+func TestHatDemoChartDrawsSeries(t *testing.T) {
+	view := viewByID(t, demoHat(t), "demo.load")
+
+	res, err := view.Run(t.Context(), engine.Args{"service": "web"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Chart() {
+		t.Fatal("a chart view did not produce series")
+	}
+	if len(res.Notes) > 0 {
+		t.Fatalf("notes: %v", res.Notes)
+	}
+	// The parameter reaches the script, and the order is the draw order.
+	if len(res.Series) != 2 || res.Series[0].Name != "web max" || res.Series[1].Name != "web avg" {
+		t.Fatalf("series %+v, want web max then web avg", res.Series)
+	}
+	if pts := res.Series[0].Points; len(pts) != 96 {
+		t.Fatalf("%d points, want a day at 15 minutes", len(pts))
+	}
+	if res.YRange == nil || res.YRange[0] != 0 || res.YRange[1] != 100 {
+		t.Errorf("yrange %v, want the fixed 0..100 axis", res.YRange)
+	}
+}
