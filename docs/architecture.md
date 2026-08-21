@@ -316,7 +316,7 @@ New lines pin the view to the bottom **only when it is already there** —
 a reader who has scrolled up is reading,
 and must not have the view yanked out from under them.
 
-The two shipped log views follow, and read `--tail 5000` on the way in.
+The two log views in the albedaran hat follow, and read `--tail 5000` on the way in.
 One of them pipes through `grep`, which needs `--line-buffered`:
 a pipe makes grep hold its output back in 4k blocks,
 and a followed log delivered in blocks is a followed log that looks stuck.
@@ -650,7 +650,7 @@ one picks the hat to run, the other says where clones land.
 Three layouts, tried in order, because each is what someone would write:
 
 - `hats/<name>/` — a repository that is something else as well,
-  the way this one holds its own hats beside the source;
+  keeping its hats beside the source;
 - `<name>/` at the root — a repository that is nothing but hats,
   where a `hats/` level would only repeat the repository's own name;
 - `*.yaml` at the root — one repository, one hat.
@@ -790,7 +790,12 @@ example/           a hat that invents its data, and the config fixture
   Every script run is a `tea.Cmd`;
   a `seq` counter discards results of superseded runs,
   and one spinner tick chain is kept alive at a time.
-- The run timeout (30s) is the TUI's policy; the engine just honours ctx.
+- The run timeout (30s) is the TUI's policy — one per view run,
+  and one per step of a job, so nine slow rows do not share a budget.
+  The engine honours ctx, and adds one deadline of its own:
+  an action expression gets two seconds,
+  because it is evaluated inside `Update`,
+  where a jq loop would freeze the TUI.
 - The screen is framed boxes:
   the title across the top;
   the menu down the left;

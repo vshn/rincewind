@@ -1,11 +1,15 @@
+<p align="center">
+  <img width=80% src="./assets/rincewind.png" alt="a wizard hat, a chest and potatoes" />
+</p>
+
 # rincewind
 
 > [!WARNING]
 > This tool is written with AI, the code is partially vetted by a human.
-> All commands interacting with a cluster or other system are defined in Hats,
+> All commands interacting with a cluster or other system are defined in hats,
 > the tool itself does not contain any code that runs against external systems.
 > The exception to the rule are interactions with Github,
-> for searching and downloading Hats.
+> for searching and downloading hats.
 
 Config-driven cluster diagnostic TUI.
 Views are pulled out of a **hat**: a directory of YAML files.
@@ -81,7 +85,7 @@ guessing which cluster you meant.
 `hats install` clones into `~/.config/rincewind/` (or `--dir`, or
 `$RINCEWIND_HATS_DIR`), one flat directory per repository. `hats update`
 fetches, shows you the diff, and asks before applying it; `hats list` prints
-the paths. **A hat is shell scripts that run as you, against your cluster** —
+the paths, and `hats remove` deletes a clone. **A hat is shell scripts that run as you, against your cluster** —
 the topic search is discovery, not a registry, so read one before installing
 it.
 
@@ -98,9 +102,20 @@ with `esc` to stop and `r` to start again.
 Following pauses while its tab is in the background,
 so nothing keeps running behind a tab nobody is looking at.
 
+A view of time series is `class: chart`:
+`rows` shapes the same JSON stream into series —
+`{name, points: [[t, v], …]}`, one jq step from a Prometheus `query_range` —
+drawn as a braille plot with a legend, later series on top.
+`/` picks series by name, `yrange:` fixes the value axis,
+and [example/metrics.yaml](example/metrics.yaml) is the reference.
+
 The kubectl context is shown top right, and asked for again whenever the view
 changes — so what you are about to act on is on screen before you act.
 Without a kubectl, or without a current context, nothing is shown there.
+
+A reload that fails keeps the rows you had:
+the failure is said in full under them,
+and the status line marks them `⚠ stale — from <time>`.
 
 In the TUI: `⏎` runs the view under the cursor, `⇥` focuses the output,
 `/` filters, `space`/`a` select rows, `r` reloads, `q` quits.
