@@ -1087,7 +1087,7 @@ func (m *model) toggleRow() {
 // are. Visible means filtered: what you see is what you mark.
 func (m *model) toggleAll() {
 	vis := m.visible()
-	if len(vis.Rows) == 0 {
+	if m.focus != paneOutput || len(vis.Rows) == 0 {
 		return
 	}
 
