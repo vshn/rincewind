@@ -102,6 +102,96 @@ func TestParseSource(t *testing.T) {
 	}
 }
 
+// Both spellings of the same repository come out of parsing, because the
+// clone tries ssh before https.
+func TestParseSourceNamesBothTransports(t *testing.T) {
+	src, err := ParseSource("vshn/rincewind-hats")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if src.SSH != "git@github.com:vshn/rincewind-hats.git" {
+		t.Errorf("ssh url is %q", src.SSH)
+	}
+	if src.URL != "https://github.com/vshn/rincewind-hats" {
+		t.Errorf("https url is %q", src.URL)
+	}
+}
+
+// ssh first, https after — and ssh not offered at all where there is no ssh
+// to run, which is a capability probe rather than a guess.
+func TestCloneURLsPreferSSH(t *testing.T) {
+	src, err := ParseSource("vshn/rincewind-hats")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := CloneURLs(context.Background(), src); len(got) != 2 ||
+		got[0] != src.SSH || got[1] != src.URL {
+		t.Errorf("got %q, want ssh then https", got)
+	}
+
+	// An empty PATH is a machine with no ssh on it.
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("GIT_SSH_COMMAND", "")
+	if got := CloneURLs(context.Background(), src); len(got) != 1 || got[0] != src.URL {
+		t.Errorf("without ssh on PATH the urls are %q, want https alone", got)
+	}
+}
+
+// A source with one url — a local path, as the tests clone from — is tried
+// once and reported as itself, with no talk of a transport it never had.
+func TestCloneFromASingleURL(t *testing.T) {
+	_, err := store(t).Clone(context.Background(), Source{URL: t.TempDir(), Slug: "nope"})
+	if err == nil {
+		t.Fatal("cloning an empty directory succeeded")
+	}
+	if strings.Contains(err.Error(), "ssh") {
+		t.Errorf("the error mentions ssh: %v", err)
+	}
+}
+
+// The fallback, run for real: an ssh url that cannot resolve, and the clone
+// still lands — from https, which here is a local repository.
+func TestCloneFallsBackWhenSSHFails(t *testing.T) {
+	up := upstream(t, "demo")
+	src := Source{
+		SSH:  "git@nonexistent.invalid:vshn/rincewind-hats.git",
+		URL:  up,
+		Slug: "vshn-hats",
+	}
+
+	c, err := store(t).Clone(context.Background(), src)
+	if err != nil {
+		t.Fatalf("the clone did not fall back: %v", err)
+	}
+	if len(c.Hats) != 1 || c.Hats[0].Name != "demo" {
+		t.Errorf("got %+v, want the hat from the fallback", c.Hats)
+	}
+}
+
+// When neither works, both are named: "it failed" without saying which half
+// failed how sends someone looking in the wrong place.
+func TestCloneReportsBothTransports(t *testing.T) {
+	if _, err := exec.LookPath("ssh"); err != nil {
+		t.Skip("ssh is not on PATH, so there is no ssh attempt to report")
+	}
+	src := Source{
+		SSH:  "git@nonexistent.invalid:vshn/rincewind-hats.git",
+		URL:  "https://nonexistent.invalid/vshn/rincewind-hats",
+		Slug: "vshn-hats",
+	}
+
+	_, err := store(t).Clone(context.Background(), src)
+	if err == nil {
+		t.Fatal("cloning from nowhere succeeded")
+	}
+	for _, want := range []string{"ssh", "https", "nonexistent.invalid"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error is %q, want it to mention %q", err, want)
+		}
+	}
+}
+
 // GitHub only, and a slug becomes a directory name — so anything naming
 // somewhere else, or naming nothing, dies while it is still a string.
 func TestParseSourceRefusals(t *testing.T) {

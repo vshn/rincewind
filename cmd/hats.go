@@ -69,12 +69,13 @@ var hatsSearchCmd = &cobra.Command{
 }
 
 var hatsInstallCmd = &cobra.Command{
-	Use:   "install <owner/repo | git-url>",
+	Use:   "install <owner/repo | github-url>",
 	Short: "Clone a repository of hats into the store",
 	Long: "Clone a repository into the store and report the hats in it.\n\n" +
-		"An https or ssh URL works as well as the owner/repo shorthand, which is\n" +
-		"how a private repository is installed: the shorthand only reaches GitHub,\n" +
-		"but git reaches whatever your credentials do.",
+		"Cloned over ssh where ssh works, and over https where it does not — which\n" +
+		"is how a private repository is installed, since an ssh key is a credential\n" +
+		"you already have and this command will not prompt for one. Both urls are\n" +
+		"shown before it asks.",
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		src, err := parseSource(args[0])
@@ -84,7 +85,19 @@ var hatsInstallCmd = &cobra.Command{
 		store := hats.Store{Dir: hats.DefaultDir(hatsDirFlag)}
 		out := cmd.OutOrStdout()
 
-		say(out, "\n  from   %s\n  into   %s\n\n%s\n\n", src.URL, short(store.Path(src)), warning)
+		// Both spellings, in the order they will be tried, from the same
+		// function that tries them: a plan worked out a second time could
+		// differ from what runs, which is the one thing a plan may not do.
+		urls := hats.CloneURLs(cmd.Context(), src)
+		if len(urls) == 0 {
+			return fmt.Errorf("%s has no url to clone from", src.Slug)
+		}
+		say(out, "\n  from   %s\n", urls[0])
+		for _, url := range urls[1:] {
+			say(out, "  else   %s\n", url)
+		}
+		say(out, "  into   %s\n\n%s\n\n", short(store.Path(src)), warning)
+
 		if !confirm(cmd, "Install?") {
 			return nil
 		}
