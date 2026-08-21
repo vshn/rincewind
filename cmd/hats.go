@@ -277,6 +277,16 @@ func short(path string) string {
 	return "~" + path[len(home):]
 }
 
+// confirmIn and confirmRd cache one buffered reader per stdin. A fresh
+// bufio.Reader per question reads ahead and drops what it buffered, so a
+// piped `y\ny\n` answers the first question and leaves the second at EOF.
+// The pair is rebuilt when stdin changes, which is what a test does when it
+// swaps the reader between runs.
+var (
+	confirmIn io.Reader
+	confirmRd *bufio.Reader
+)
+
 // confirm asks, unless --yes said not to. Anything but y is no, and so is a
 // closed stdin: a pipe that cannot answer has not agreed to anything.
 func confirm(cmd *cobra.Command, question string) bool {
@@ -285,12 +295,21 @@ func confirm(cmd *cobra.Command, question string) bool {
 	}
 	say(cmd.OutOrStdout(), "%s [y/N] ", question)
 
-	line, err := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
+	line, err := reader(cmd.InOrStdin()).ReadString('\n')
 	if err != nil && line == "" {
 		say(cmd.OutOrStdout(), "\n")
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(line), "y")
+}
+
+// reader hands out the buffered reader belonging to in, making one the first
+// time it is seen.
+func reader(in io.Reader) *bufio.Reader {
+	if confirmRd == nil || confirmIn != in {
+		confirmIn, confirmRd = in, bufio.NewReader(in)
+	}
+	return confirmRd
 }
 
 func init() {
