@@ -1,10 +1,13 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/vshn/rincewind/internal/engine"
 )
 
 func names(rows []any) []string {
@@ -140,6 +143,34 @@ func TestOutputLandsInTheJobTab(t *testing.T) {
 	m.Update(key("esc"))
 	if got := visibleOnly(m.View().Content); strings.Contains(got, "patched infra") {
 		t.Error("the action's output leaked into the view")
+	}
+}
+
+// A job that was cut short renders three different states in a row: what a
+// step printed, how one failed, and that the rest were never attempted —
+// "(no output)" would read as a step that ran and said nothing. The summary
+// counts both, because neither of them did what was asked.
+func TestJobLinesTellsRanFromNotRun(t *testing.T) {
+	j := &job{
+		action: engine.Action{Name: "patch"},
+		steps: []engine.Step{
+			{Row: "infra", Script: "echo one"},
+			{Row: "apps", Script: "echo two"},
+			{Row: "test", Script: "echo three"},
+		},
+		out:  [][]string{{"patched infra"}, nil, nil},
+		errs: []error{nil, fmt.Errorf("exit status 1"), fmt.Errorf("not run: context canceled")},
+		done: true,
+	}
+
+	got := visibleOnly(strings.Join(j.lines(""), "\n"))
+	for _, want := range []string{"patched infra", "exit status 1", "not run: context canceled", "2 of 3 steps failed"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the job does not say %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "(no output)") {
+		t.Errorf("a step that never ran reads as one that printed nothing:\n%s", got)
 	}
 }
 

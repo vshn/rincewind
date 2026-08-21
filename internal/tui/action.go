@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -193,8 +194,13 @@ func (m *model) drill(a *engine.Action) tea.Cmd {
 
 // work runs a job tab's steps, in order, and brings back what each printed.
 // One step per row means a failure is attributable and the rest still run.
+//
+// The job itself has no deadline; each step gets its own, because runTimeout
+// is a promise about one script run and a job of twenty rows is twenty of
+// them. What the job's context is for is being cancelled: leaving or closing
+// the tab stops the steps that have not run.
 func (m *model) work(t *tab) tea.Cmd {
-	ctx, cancel, tick := m.begin(t, runTimeout)
+	ctx, cancel, tick := m.begin(t, 0)
 
 	seq, steps := t.seq, t.job.steps
 	run := func() tea.Msg {
@@ -203,14 +209,28 @@ func (m *model) work(t *tab) tea.Cmd {
 		out := make([][]string, len(steps))
 		errs := make([]error, len(steps))
 		for i, s := range steps {
-			out[i], errs[i] = s.Run(ctx)
+			out[i], errs[i] = runStep(ctx, s)
 			if ctx.Err() != nil {
+				// The job is over, so the steps after this one are never
+				// attempted. Say that, rather than let them read as steps
+				// that ran and printed nothing.
+				for j := i + 1; j < len(steps); j++ {
+					errs[j] = fmt.Errorf("not run: %v", ctx.Err())
+				}
 				break
 			}
 		}
 		return jobMsg{seq: seq, out: out, errs: errs}
 	}
 	return withTick(run, tick)
+}
+
+// runStep bounds one step of a job, under the job's own context so that
+// cancelling the job cuts the step that is running short.
+func runStep(parent context.Context, s engine.Step) ([]string, error) {
+	ctx, cancel := context.WithTimeout(parent, runTimeout)
+	defer cancel()
+	return s.Run(ctx)
 }
 
 // selectedRows is what a working action operates on: the marked rows, in the
