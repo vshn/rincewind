@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/vshn/rincewind/internal/engine"
 )
@@ -31,7 +32,7 @@ func body(m *model) []string {
 	var out []string
 	for _, line := range strings.Split(m.View().Content, "\n") {
 		// The two boxes meet at "││"; everything after that is the content.
-		if plain := visibleOnly(line); strings.Contains(plain, "││") {
+		if plain := ansi.Strip(line); strings.Contains(plain, "││") {
 			out = append(out, strings.SplitN(plain, "││", 2)[1])
 		}
 	}
@@ -44,7 +45,7 @@ func body(m *model) []string {
 func sidebar(m *model) string {
 	var out []string
 	for _, line := range strings.Split(m.View().Content, "\n") {
-		if plain := visibleOnly(line); strings.Contains(plain, "││") {
+		if plain := ansi.Strip(line); strings.Contains(plain, "││") {
 			out = append(out, strings.SplitN(plain, "││", 2)[0])
 		}
 	}
@@ -136,7 +137,7 @@ func TestScrollPositionIsShownInTheFrame(t *testing.T) {
 	m.Update(key("end"))
 
 	border := strings.Split(m.View().Content, "\n")[3]
-	if got := visibleOnly(border); !strings.Contains(got, "/40") {
+	if got := ansi.Strip(border); !strings.Contains(got, "/40") {
 		t.Errorf("frame %q carries no scroll position", got)
 	}
 }
@@ -158,6 +159,25 @@ func TestSidebarScrollsWithTheCursor(t *testing.T) {
 	}
 	if strings.Contains(menu, "view01") {
 		t.Error("the sidebar did not scroll at all")
+	}
+}
+
+// The help only offers the keys that would do something, and the answer now
+// comes from the width recorded while the result was laid out — so it has to
+// follow the result rather than the one it was first measured on.
+func TestScrollableFollowsTheResult(t *testing.T) {
+	m := scrolling(t)
+	if !m.scrollable() {
+		t.Fatal("a table wider than its box does not count as scrollable")
+	}
+
+	// The same view, narrow enough to fit: nothing is past the edge now.
+	m.Update(resultMsg{seq: m.cur().seq, res: engine.Result{
+		Cols: []string{"NAME"},
+		Rows: []engine.Row{row("worker-01")},
+	}})
+	if m.scrollable() {
+		t.Error("a table that fits still counts as scrollable")
 	}
 }
 

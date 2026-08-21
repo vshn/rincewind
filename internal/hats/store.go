@@ -129,8 +129,8 @@ func listing(clones []Clone) string {
 // hatsIn finds the hats in a clone. Three layouts, tried in order, because
 // each is what someone would naturally write:
 //
-//   - hats/<name>/ — a repository that is something else as well, the way
-//     the rincewind repository holds its own two hats beside the source;
+//   - hats/<name>/ — a repository that is something else as well, keeping
+//     its hats beside the source;
 //   - <name>/ at the root — a repository that is nothing but hats, where a
 //     hats/ level would only repeat the repository's own name;
 //   - *.yaml at the root — one repository, one hat.

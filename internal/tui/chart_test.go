@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/vshn/rincewind/internal/engine"
 )
@@ -35,7 +36,7 @@ func brailleIn(s string) bool {
 func TestChartShowsPlotAndLegend(t *testing.T) {
 	m := charting(t)
 
-	content := visibleOnly(m.View().Content)
+	content := ansi.Strip(m.View().Content)
 	if !brailleIn(content) {
 		t.Error("no braille rune on screen")
 	}
@@ -51,7 +52,7 @@ func TestChartFilterPicksSeries(t *testing.T) {
 	m := charting(t)
 	typeFilter(m, "worker")
 
-	content := visibleOnly(m.View().Content)
+	content := ansi.Strip(m.View().Content)
 	if !strings.Contains(content, "── worker-01") {
 		t.Error("the matching series is gone")
 	}
@@ -118,7 +119,7 @@ func TestChartRedrawsOnResize(t *testing.T) {
 			t.Errorf("line %d is %d wide, want 72", i, got)
 		}
 	}
-	if !brailleIn(visibleOnly(m.View().Content)) {
+	if !brailleIn(ansi.Strip(m.View().Content)) {
 		t.Error("the plot did not survive the resize")
 	}
 }

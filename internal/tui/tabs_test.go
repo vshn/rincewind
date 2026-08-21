@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/vshn/rincewind/internal/engine"
 )
@@ -89,8 +90,8 @@ func TestDrillOpensTheTargetInANewTab(t *testing.T) {
 	if len(m.tabs) != 2 {
 		t.Fatalf("%d tabs after drilling, want 2", len(m.tabs))
 	}
-	if m.act != 1 {
-		t.Errorf("active tab is %d, want the new one", m.act)
+	if m.active != 1 {
+		t.Errorf("active tab is %d, want the new one", m.active)
 	}
 	if got := m.cur().view.ID; got != "demo.nodes" {
 		t.Errorf("new tab shows %q, want demo.nodes", got)
@@ -217,13 +218,13 @@ func TestTabKeysStopAtTheEnds(t *testing.T) {
 	deliver(t, m, longTable())
 
 	m.Update(key("]"))
-	if m.act != 1 {
-		t.Errorf("next tab past the end moved to %d", m.act)
+	if m.active != 1 {
+		t.Errorf("next tab past the end moved to %d", m.active)
 	}
 	m.Update(key("["))
 	m.Update(key("["))
-	if m.act != 0 {
-		t.Errorf("previous tab past the start moved to %d", m.act)
+	if m.active != 0 {
+		t.Errorf("previous tab past the start moved to %d", m.active)
 	}
 }
 
@@ -298,7 +299,7 @@ func TestTabsAreShownInTheContentBorder(t *testing.T) {
 	m.Update(key("enter"))
 	deliver(t, m, longTable())
 
-	border := visibleOnly(strings.Split(m.View().Content, "\n")[titleHeight])
+	border := ansi.Strip(strings.Split(m.View().Content, "\n")[titleHeight])
 	for _, want := range []string{"pools", "nodes", "▸"} {
 		if !strings.Contains(border, want) {
 			t.Errorf("tab bar %q missing %q", border, want)
@@ -311,11 +312,11 @@ func TestClickOnATabActivatesIt(t *testing.T) {
 	m.Update(key("enter"))
 	deliver(t, m, longTable())
 
-	border := visibleOnly(strings.Split(m.View().Content, "\n")[titleHeight])
+	border := ansi.Strip(strings.Split(m.View().Content, "\n")[titleHeight])
 	m.Update(click(colOf(t, border, "pools"), titleHeight))
 
-	if m.act != 0 {
-		t.Errorf("active tab is %d after clicking the first, want 0", m.act)
+	if m.active != 0 {
+		t.Errorf("active tab is %d after clicking the first, want 0", m.active)
 	}
 }
 

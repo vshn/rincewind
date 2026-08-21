@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/vshn/rincewind/internal/engine"
 )
@@ -20,6 +22,22 @@ func showing(t *testing.T) *model {
 	m.Update(key("enter"))
 	m.Update(resultMsg{seq: m.seq, res: engine.Result{Lines: logLines()}})
 	return m
+}
+
+// A log keeps what it has for the same reason a table does, and the failure
+// is said under the last line rather than in place of all of them.
+func TestAFailedRunKeepsTheLog(t *testing.T) {
+	m := showing(t)
+
+	m.Update(key("r"))
+	m.Update(resultMsg{seq: m.cur().seq, err: fmt.Errorf("pod is gone")})
+
+	content := ansi.Strip(m.View().Content)
+	for _, want := range []string{"indented continuation line", "pod is gone", "⚠ stale"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("the failed run does not leave %q on screen:\n%s", want, content)
+		}
+	}
 }
 
 // The point of the class: the lines arrive as the script wrote them.
@@ -43,7 +61,7 @@ func TestTextFilterGrepsTheLines(t *testing.T) {
 	m := showing(t)
 	typeFilter(m, "error")
 
-	content := visibleOnly(m.View().Content)
+	content := ansi.Strip(m.View().Content)
 	if !strings.Contains(content, "liveness probe failed") {
 		t.Error("the matching line is gone")
 	}
@@ -95,7 +113,7 @@ func TestTextViewHasNoSelection(t *testing.T) {
 	if n := len(m.cur().selection); n != 0 {
 		t.Errorf("%d rows selected in a view that has none", n)
 	}
-	if strings.Contains(visibleOnly(m.View().Content), "selected") {
+	if strings.Contains(ansi.Strip(m.View().Content), "selected") {
 		t.Error("the status line offers a selection")
 	}
 }

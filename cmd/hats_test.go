@@ -252,6 +252,57 @@ func TestUpdateShowsTheDiffAndCanBeDeclined(t *testing.T) {
 	}
 }
 
+// Two questions in one run, answered from a pipe: the reader that reads the
+// first answer must not swallow the second.
+func TestUpdateAnswersEveryQuestionFromAPipe(t *testing.T) {
+	store := t.TempDir()
+
+	var paths []string
+	for range 2 {
+		repo := repoWith(t, "demo")
+		fromLocal(t, repo)
+		if out, err := runCmd(t, "", "hats", "-d", store, "-y", "install", repo); err != nil {
+			t.Fatal(err, out)
+		}
+		commitChange(t, repo)
+		paths = append(paths, filepath.Join(store, "vshn-"+filepath.Base(repo)))
+	}
+
+	before := make([]string, len(paths))
+	for i, p := range paths {
+		before[i] = hats.Head(t.Context(), p)
+	}
+
+	out, err := runCmd(t, "y\ny\n", "hats", "-d", store, "update")
+	if err != nil {
+		t.Fatal(err, out)
+	}
+	for i, p := range paths {
+		if hats.Head(t.Context(), p) == before[i] {
+			t.Errorf("clone %d did not move although the answer was yes:\n%s", i, out)
+		}
+	}
+}
+
+// commitChange puts a second commit on a repository, so an installed clone
+// has something to pull.
+func commitChange(t *testing.T, repo string) {
+	t.Helper()
+	path := filepath.Join(repo, "hats", "demo", "views.yaml")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(body, []byte("\n# changed\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-m", "second"}} {
+		if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatal(err, string(out))
+		}
+	}
+}
+
 // An empty store is the answer "nothing", and it says what to do next.
 func TestListOfAnEmptyStore(t *testing.T) {
 	out, err := runCmd(t, "", "hats", "-d", t.TempDir(), "list")

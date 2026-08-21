@@ -48,7 +48,7 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return tui.Run(views, version)
+		return tui.Run(cmd.Context(), views, version)
 	},
 }
 
@@ -133,8 +133,11 @@ func init() {
 // Execute runs the root command. Errors are printed by cobra; printing them
 // again here would double every message.
 //
-// Ctrl-C cancels the context rather than killing the process outright, so a
-// followed view stops its script and a run in flight is not left behind.
+// A signal cancels the context rather than killing the process outright, so
+// the TUI comes back from bubbletea and stops the scripts it had running.
+// Ctrl-C inside the TUI is not one of these: the terminal is in raw mode, so
+// it arrives as a keystroke — this is the path a SIGTERM takes, and the one
+// a Ctrl-C takes when there is no terminal to be raw.
 func Execute() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

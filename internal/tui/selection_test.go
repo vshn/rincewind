@@ -64,6 +64,7 @@ func TestAToggleAllRespectsTheFilter(t *testing.T) {
 	}
 	m.Update(key("enter"))
 
+	m.Update(key("tab")) // focus the output pane
 	m.Update(key("a"))
 	if len(m.cur().selection) != 2 || !m.cur().selection["worker-01"] || !m.cur().selection["worker-02"] {
 		t.Fatalf("selected %v, want the two workers", selectedKeys(m))
@@ -73,6 +74,15 @@ func TestAToggleAllRespectsTheFilter(t *testing.T) {
 	m.Update(key("a"))
 	if len(m.cur().selection) != 0 {
 		t.Fatalf("selected %v after second a, want none", selectedKeys(m))
+	}
+}
+
+func TestAToggleAllNeedsTheOutputPane(t *testing.T) {
+	m := loaded(t)
+
+	m.Update(key("a"))
+	if len(m.cur().selection) != 0 {
+		t.Fatalf("a selected %v from the sidebar", selectedKeys(m))
 	}
 }
 

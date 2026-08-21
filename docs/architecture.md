@@ -278,7 +278,11 @@ rather than when the script exits.
 Only a text view may:
 a table is sorted and column-aligned over the whole set,
 so it has no way to grow a row at a time.
-It rules out `refresh`, for the same reason a live thing is not polled.
+It rules out `refresh`, for the same reason a live thing is not polled,
+and `reload: true` on any of its actions:
+following resumes by itself on the way back to the tab,
+and a reload from a job tab would start the stream
+behind a tab nobody is looking at.
 
 The engine keeps the two paths apart rather than blurring them.
 A snapshot view has a `Run` returning a `Result`;
@@ -312,7 +316,7 @@ New lines pin the view to the bottom **only when it is already there** —
 a reader who has scrolled up is reading,
 and must not have the view yanked out from under them.
 
-The two shipped log views follow, and read `--tail 5000` on the way in.
+The two log views in the albedaran hat follow, and read `--tail 5000` on the way in.
 One of them pipes through `grep`, which needs `--line-buffered`:
 a pipe makes grep hold its output back in 4k blocks,
 and a followed log delivered in blocks is a followed log that looks stuck.
@@ -646,7 +650,7 @@ one picks the hat to run, the other says where clones land.
 Three layouts, tried in order, because each is what someone would write:
 
 - `hats/<name>/` — a repository that is something else as well,
-  the way this one holds its own hats beside the source;
+  keeping its hats beside the source;
 - `<name>/` at the root — a repository that is nothing but hats,
   where a `hats/` level would only repeat the repository's own name;
 - `*.yaml` at the root — one repository, one hat.
@@ -710,6 +714,17 @@ Reversing that decision means answering it:
    the other columns and rows stay usable.
 3. **Script failures show the script's stderr**, not a Go stack:
    the script's own message is the useful one.
+4. **A failed run replaces nothing.**
+   A view that has produced rows keeps them:
+   the failure is said under them, in full,
+   and a marker on the status line names the time the rows are from.
+   Only a view that has never produced anything
+   gives the whole pane to the reason.
+   One unreachable API server used to take a standing table away
+   for a whole `refresh` interval,
+   and pressing `esc` mid-reload left an empty view behind without saying so.
+   The cost is that an action can act on rows that have gone stale;
+   the marker is what makes that a decision rather than a surprise.
 
 ## Results are data, not text
 
@@ -775,7 +790,12 @@ example/           a hat that invents its data, and the config fixture
   Every script run is a `tea.Cmd`;
   a `seq` counter discards results of superseded runs,
   and one spinner tick chain is kept alive at a time.
-- The run timeout (30s) is the TUI's policy; the engine just honours ctx.
+- The run timeout (30s) is the TUI's policy — one per view run,
+  and one per step of a job, so nine slow rows do not share a budget.
+  The engine honours ctx, and adds one deadline of its own:
+  an action expression gets two seconds,
+  because it is evaluated inside `Update`,
+  where a jq loop would freeze the TUI.
 - The screen is framed boxes:
   the title across the top;
   the menu down the left;
@@ -890,6 +910,7 @@ example/           a hat that invents its data, and the config fixture
 | `Run` returns data, never formatted strings | A string cannot be filtered, sorted or restyled |
 | One table renderer, styling after layout | Escape codes in cells misalign everything that measures naively |
 | Cell errors render `!err` + note, view survives | One broken expression must not take down 199 good rows |
+| A failed run keeps the last good rows, marked stale | A blip on a refreshing view would otherwise replace the answer with the reason for half a minute; what is on screen is worth more than the certainty that it is current, as long as the screen says which it is |
 | No shelling out to jq/column/… from Go | Each has a Go replacement; scripts in a hat may do what they like |
 | …except the clipboard | OSC 52 was that replacement and Terminal.app does not implement it; NSPasteboard needs cgo and the build is static, so the premise fails and the rule yields rather than the feature |
 | The clipboard writer is probed on PATH | A Mac without pbcopy and a Wayland session without wl-copy both exist; the platform name answers a different question |

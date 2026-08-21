@@ -74,6 +74,11 @@ Both kinds of action open a tab; `esc` closes it.
   Runtime cell errors render `!err` plus one note
   and never take down the view.
   Script failures surface the script's stderr.
+- **A failed run replaces nothing.**
+  A view that has rows keeps them, with the failure under them
+  and `⚠ stale — from <time>` on the status line;
+  only a view that has never produced anything
+  gives the pane to the error.
 - **Sort and emphasis work on raw jq values**, before formatting.
 - **A text view's lines are never reshaped.**
   No `oneLine`, no column padding, no truncation:
@@ -187,7 +192,10 @@ internal/
               script runner, stream decode, gojq, sort, formats;
               Table/Row/Cell, Args/Param/Action
   render/     Table → styled lines
-  tui/        model.go   bubbletea model, tabs, keys, mouse
+  tui/        model.go   bubbletea model, tabs, the update loop, mouse
+              keys.go    the binding table and the movement it causes
+              layout.go  boxes, hit-testing, scroll positions
+              paint.go   View and everything it renders
               action.go  firing actions, confirmation, drill
               frame.go   framed boxes, tab bar, action bar
 example/      a hat that invents its own data, needs no cluster; this is

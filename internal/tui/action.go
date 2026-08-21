@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/vshn/rincewind/internal/engine"
+	"github.com/vshn/rincewind/internal/render"
 )
 
 // actionFor resolves a key to an action of the view on screen. It only
@@ -50,7 +51,7 @@ func (m *model) fire(a *engine.Action) tea.Cmd {
 	// the action needs values, then the commands, then the question.
 	from := m.cur()
 	m.park()
-	m.closeFrom(m.act + 1)
+	m.closeFrom(m.active + 1)
 
 	t := &tab{job: &job{
 		action: *a, rows: rows, keys: keys, args: from.args,
@@ -60,7 +61,7 @@ func (m *model) fire(a *engine.Action) tea.Cmd {
 		t.job.reload = from
 	}
 	m.tabs = append(m.tabs, t)
-	m.act = len(m.tabs) - 1
+	m.active = len(m.tabs) - 1
 	m.filter.SetValue("")
 	m.vp.SetYOffset(0)
 	m.vp.SetXOffset(0)
@@ -150,7 +151,7 @@ func (m *model) plan(t *tab) tea.Cmd {
 	// A rowless action is exactly one step, and that step is on screen.
 	j.prompt = prompt
 	if j.action.NeedsRows() {
-		j.prompt = fmt.Sprintf("%s (%s)", prompt, plural(len(j.rows), "row"))
+		j.prompt = fmt.Sprintf("%s (%s)", prompt, render.Plural(len(j.rows), "row"))
 	}
 	m.showResult()
 	return nil
@@ -171,13 +172,13 @@ func (m *model) drill(a *engine.Action) tea.Cmd {
 	// Drilling from a tab in the middle abandons what was opened from it:
 	// the tabs are one path, not a heap of windows.
 	m.park()
-	m.closeFrom(m.act + 1)
+	m.closeFrom(m.active + 1)
 
 	args, err := a.Args(src, m.cur().args)
 
 	t := newTab(a.Open, args)
 	m.tabs = append(m.tabs, t)
-	m.act = len(m.tabs) - 1
+	m.active = len(m.tabs) - 1
 	m.filter.SetValue("")
 	m.focus = paneOutput
 
@@ -194,13 +195,13 @@ func (m *model) drill(a *engine.Action) tea.Cmd {
 
 // work runs a job tab's steps, in order, and brings back what each printed.
 // One step per row means a failure is attributable and the rest still run.
+//
+// The job itself has no deadline; each step gets its own, because runTimeout
+// is a promise about one script run and a job of twenty rows is twenty of
+// them. What the job's context is for is being cancelled: leaving or closing
+// the tab stops the steps that have not run.
 func (m *model) work(t *tab) tea.Cmd {
-	t.stop()
-	m.seq++
-	t.seq, t.running = m.seq, true
-
-	ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
-	t.cancel = cancel
+	ctx, cancel, tick := m.begin(t, 0)
 
 	seq, steps := t.seq, t.job.steps
 	run := func() tea.Msg {
@@ -209,19 +210,28 @@ func (m *model) work(t *tab) tea.Cmd {
 		out := make([][]string, len(steps))
 		errs := make([]error, len(steps))
 		for i, s := range steps {
-			out[i], errs[i] = s.Run(ctx)
+			out[i], errs[i] = runStep(ctx, s)
 			if ctx.Err() != nil {
+				// The job is over, so the steps after this one are never
+				// attempted. Say that, rather than let them read as steps
+				// that ran and printed nothing.
+				for j := i + 1; j < len(steps); j++ {
+					errs[j] = fmt.Errorf("not run: %v", ctx.Err())
+				}
 				break
 			}
 		}
 		return jobMsg{seq: seq, out: out, errs: errs}
 	}
+	return withTick(run, tick)
+}
 
-	if m.tickAlive {
-		return run
-	}
-	m.tickAlive = true
-	return tea.Batch(run, m.spin.Tick)
+// runStep bounds one step of a job, under the job's own context so that
+// cancelling the job cuts the step that is running short.
+func runStep(parent context.Context, s engine.Step) ([]string, error) {
+	ctx, cancel := context.WithTimeout(parent, runTimeout)
+	defer cancel()
+	return s.Run(ctx)
 }
 
 // selectedRows is what a working action operates on: the marked rows, in the
@@ -338,17 +348,10 @@ func (j *job) summary() string {
 		}
 	}
 	if failed > 0 {
-		return errStyle.Render(fmt.Sprintf("%d of %s failed", failed, plural(len(j.steps), "step")))
+		return errStyle.Render(fmt.Sprintf("%d of %s failed", failed, render.Plural(len(j.steps), "step")))
 	}
-	return goodStyle.Render(fmt.Sprintf("%s ok", plural(len(j.steps), "step")))
+	return goodStyle.Render(fmt.Sprintf("%s ok", render.Plural(len(j.steps), "step")))
 }
 
 // label names the job tab.
 func (j *job) label() string { return j.action.Name }
-
-func plural(n int, what string) string {
-	if n == 1 {
-		return fmt.Sprintf("%d %s", n, what)
-	}
-	return fmt.Sprintf("%d %ss", n, what)
-}

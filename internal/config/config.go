@@ -197,6 +197,10 @@ var envName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 // reserved are the keys the TUI answers itself. An action claiming one would
 // take navigation or quitting away from the user, so config may not.
+//
+// This set is the contract, and it lives here because config is where a hat
+// is held to it. The TUI keeps the other half — the keys it actually binds —
+// beside its own switch, and a test there holds the two together.
 var reserved = map[string]bool{
 	"q": true, "ctrl+c": true, "/": true, "tab": true, "shift+tab": true,
 	"esc": true, "up": true, "down": true, "k": true, "j": true,
@@ -204,6 +208,16 @@ var reserved = map[string]bool{
 	"home": true, "end": true, "g": true, "G": true,
 	"r": true, "space": true, " ": true, "a": true, "M": true, "Y": true,
 	"[": true, "]": true, "x": true, "<": true, ">": true,
+}
+
+// ReservedKeys is that set, sorted, for whoever has to agree with it.
+func ReservedKeys() []string {
+	out := make([]string, 0, len(reserved))
+	for key := range reserved {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // toDef checks everything the schema can express and hands the rest —
@@ -365,6 +379,13 @@ func toDef(v view) (engine.Def, error) {
 		// is an action that acts on nothing.
 		if (d.Text || d.Chart) && (a.Open != "" || a.Scope != engine.ScopeNone) {
 			return fail("action %s: a %s view has no rows, so its actions need scope: none", a.Name, v.Class)
+		}
+		// A followed view has no finished state to return to: leaving its
+		// tab pauses the stream and coming back starts it again. Reloading
+		// one from a job tab would start a stream behind a background tab,
+		// which is the one thing following must not do.
+		if d.Follow && a.Reload {
+			return fail("action %s: reload cannot re-run a followed view; following resumes by itself", a.Name)
 		}
 		if actNames[a.Name] {
 			return fail("action %s: declared twice", a.Name)

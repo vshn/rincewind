@@ -158,7 +158,12 @@ func (s Store) Clone(ctx context.Context, src Source) (Clone, error) {
 }
 
 // isSSH reports whether a url is one ssh will carry, in either spelling.
+// http(s) is decided by the scheme alone: `https://user@host/a:b` carries
+// both marks of the scp form without being it.
 func isSSH(url string) bool {
+	if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+		return false
+	}
 	return strings.HasPrefix(url, "ssh://") || (strings.Contains(url, "@") && strings.Contains(url, ":"))
 }
 

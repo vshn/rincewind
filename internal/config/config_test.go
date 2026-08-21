@@ -175,7 +175,7 @@ func TestParsedChartRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.Chart() {
+	if !res.IsChart() {
 		t.Fatal("the result does not read as a chart")
 	}
 	if len(res.Notes) > 0 {

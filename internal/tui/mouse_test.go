@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func click(x, y int) tea.MouseClickMsg {
@@ -21,7 +22,7 @@ func wheel(x int, button tea.MouseButton) tea.MouseWheelMsg {
 func lineOf(t *testing.T, m *model, needle string) int {
 	t.Helper()
 	for i, line := range strings.Split(m.View().Content, "\n") {
-		if strings.Contains(visibleOnly(line), needle) {
+		if strings.Contains(ansi.Strip(line), needle) {
 			return i
 		}
 	}

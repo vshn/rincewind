@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/vshn/rincewind/internal/engine"
 )
@@ -84,7 +85,7 @@ func (m *model) tabBar(avail int) (string, []tabHit) {
 		if t.running {
 			label += "…"
 		}
-		if i == m.act {
+		if i == m.active {
 			label = "▸" + label
 		}
 		plain[i] = " " + label + " "
@@ -101,8 +102,8 @@ func (m *model) tabBar(avail int) (string, []tabHit) {
 		if i > from {
 			b.WriteString(dividerStyle.Render("│"))
 		}
-		x0 := lipgloss.Width(visibleOnly(b.String()))
-		if i == m.act {
+		x0 := lipgloss.Width(b.String())
+		if i == m.active {
 			b.WriteString(tabStyle.Render(plain[i]))
 		} else {
 			b.WriteString(dividerStyle.Render(plain[i]))
@@ -127,8 +128,8 @@ func (m *model) tabWindow(plain []string, avail int) (from, to int) {
 		return 0, len(plain)
 	}
 
-	from, to = m.act, m.act+1
-	used := lipgloss.Width(plain[m.act]) + 2 // the chip plus both markers
+	from, to = m.active, m.active+1
+	used := lipgloss.Width(plain[m.active]) + 2 // the chip plus both markers
 	for {
 		grew := false
 		if to < len(plain) && used+lipgloss.Width(plain[to])+1 <= avail {
@@ -184,7 +185,7 @@ func (m *model) actionLine() string {
 
 	// Nothing to act on yet: show the bindings, but do not pretend they work.
 	if t.res == nil || t.running || m.focus != paneOutput {
-		return dividerStyle.Render(visibleOnly(line))
+		return dividerStyle.Render(ansi.Strip(line))
 	}
 	return line
 }

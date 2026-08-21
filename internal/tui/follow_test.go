@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/vshn/rincewind/internal/engine"
 )
@@ -87,13 +89,44 @@ func chunk(m *model, lines ...string) {
 	m.Update(chunkMsg{seq: m.cur().seq, lines: lines})
 }
 
+// "following…" is painted with a spinner beside it, and a spinner only turns
+// while a tick chain is alive — which starting a stream has to see to.
+func TestFollowStartsTheSpinnerTick(t *testing.T) {
+	rec := &streamRec{}
+	m := newModel(followViews(rec))
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 96, Height: 20})
+	m = next.(*model)
+
+	m.Update(key("enter"))
+	deliver(t, m, engine.Result{
+		Cols: []string{"NAME"},
+		Rows: []engine.Row{row("api"), row("worker")},
+	})
+
+	// The table's own run started a chain; with nothing running any more the
+	// next tick retires it. That is the state a drill-down starts from.
+	m.Update(spinner.TickMsg{})
+	if m.tickAlive {
+		t.Fatal("a tick with nothing running left the chain alive")
+	}
+
+	m.Update(key("tab"))
+	m.Update(key("enter")) // the drill-down action
+	if m.cur().stream == nil {
+		t.Fatal("drilling into a followed view started no stream")
+	}
+	if !m.tickAlive {
+		t.Error("following started no tick chain, so the spinner stands still")
+	}
+}
+
 // The point of following: lines show up as they are produced, not when the
 // script exits.
 func TestFollowShowsLinesAsTheyArrive(t *testing.T) {
 	m, _ := following(t)
 
 	chunk(m, "first line")
-	if !strings.Contains(visibleOnly(m.View().Content), "first line") {
+	if !strings.Contains(ansi.Strip(m.View().Content), "first line") {
 		t.Fatal("the first line never appeared")
 	}
 	if !m.cur().running {
@@ -101,7 +134,7 @@ func TestFollowShowsLinesAsTheyArrive(t *testing.T) {
 	}
 
 	chunk(m, "second line")
-	content := visibleOnly(m.View().Content)
+	content := ansi.Strip(m.View().Content)
 	if !strings.Contains(content, "first line") || !strings.Contains(content, "second line") {
 		t.Errorf("the second chunk replaced the first: %q", content)
 	}
@@ -114,7 +147,7 @@ func TestFollowSticksToTheBottomOnlyFromTheBottom(t *testing.T) {
 	for i := range 60 {
 		chunk(m, fmt.Sprintf("line %02d", i))
 	}
-	if !strings.Contains(visibleOnly(m.View().Content), "line 59") {
+	if !strings.Contains(ansi.Strip(m.View().Content), "line 59") {
 		t.Fatal("following did not stay at the end")
 	}
 
@@ -125,13 +158,13 @@ func TestFollowSticksToTheBottomOnlyFromTheBottom(t *testing.T) {
 	if m.vp.YOffset() != at {
 		t.Errorf("a new line scrolled a reader who had scrolled up: %d, want %d", m.vp.YOffset(), at)
 	}
-	if strings.Contains(visibleOnly(m.View().Content), "line 60") {
+	if strings.Contains(ansi.Strip(m.View().Content), "line 60") {
 		t.Error("the new line dragged the viewport to the bottom")
 	}
 
 	m.Update(key("end"))
 	chunk(m, "line 61")
-	if !strings.Contains(visibleOnly(m.View().Content), "line 61") {
+	if !strings.Contains(ansi.Strip(m.View().Content), "line 61") {
 		t.Error("back at the bottom, following did not resume")
 	}
 }
@@ -159,7 +192,7 @@ func TestFollowSaysWhenTheStreamEnds(t *testing.T) {
 	chunk(m, "the last thing it said")
 	m.Update(chunkMsg{seq: m.cur().seq, end: true})
 
-	content := visibleOnly(m.View().Content)
+	content := ansi.Strip(m.View().Content)
 	if !strings.Contains(content, "stream ended") {
 		t.Errorf("the end went unmentioned: %q", content)
 	}
@@ -178,7 +211,7 @@ func TestFollowFailureKeepsTheLines(t *testing.T) {
 	chunk(m, "before it broke")
 	m.Update(chunkMsg{seq: m.cur().seq, end: true, err: fmt.Errorf("exit status 1")})
 
-	content := visibleOnly(m.View().Content)
+	content := ansi.Strip(m.View().Content)
 	if !strings.Contains(content, "before it broke") {
 		t.Error("the error pane swallowed the lines")
 	}
@@ -197,7 +230,7 @@ func TestEscStopsFollowing(t *testing.T) {
 	if err := rec.ctxs[0].Err(); err == nil {
 		t.Error("esc left the script running")
 	}
-	content := visibleOnly(m.View().Content)
+	content := ansi.Strip(m.View().Content)
 	if !strings.Contains(content, "stopped") {
 		t.Errorf("stopping went unmentioned: %q", content)
 	}
@@ -222,7 +255,7 @@ func TestReloadStartsFollowingAgain(t *testing.T) {
 	if !m.cur().running || m.cur().stream == nil {
 		t.Error("reloading did not put the tab back to following")
 	}
-	if strings.Contains(visibleOnly(m.View().Content), "stream ended") {
+	if strings.Contains(ansi.Strip(m.View().Content), "stream ended") {
 		t.Error("the end marker survived the restart")
 	}
 }
@@ -246,7 +279,7 @@ func TestFollowPausesInTheBackground(t *testing.T) {
 	if !m.cur().running {
 		t.Error("the tab did not resume following")
 	}
-	if strings.Contains(visibleOnly(m.View().Content), "stream ended") {
+	if strings.Contains(ansi.Strip(m.View().Content), "stream ended") {
 		t.Error("a pause was reported as the stream ending")
 	}
 }
@@ -296,7 +329,7 @@ func TestOpeningAnotherViewStopsTheScript(t *testing.T) {
 
 	// Collapse to one tab first, so the followed view is the one replaced.
 	m.tabs[0] = m.tabs[1]
-	m.tabs, m.act = m.tabs[:1], 0
+	m.tabs, m.active = m.tabs[:1], 0
 
 	m.focus = paneList
 	m.Update(key("enter"))
@@ -312,7 +345,7 @@ func TestFollowHelpOffersStopNotBack(t *testing.T) {
 	m, _ := following(t)
 	chunk(m, "a line")
 
-	help := visibleOnly(m.View().Content)
+	help := ansi.Strip(m.View().Content)
 	if !strings.Contains(help, "esc stop") {
 		t.Errorf("the legend does not say esc stops the stream: %q", help)
 	}

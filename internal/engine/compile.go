@@ -158,7 +158,7 @@ func Compile(d Def) (View, error) {
 		cv.sort = append(cv.sort, sortKey{col: idx, desc: s.Desc, rank: s.Rank})
 	}
 
-	return newView(d, cv.run)
+	return newView(d, cv.runTable)
 }
 
 // newView wraps a run function in everything a view carries besides it: the

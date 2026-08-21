@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func typeFilter(m *model, needle string) {
@@ -26,7 +27,7 @@ func TestFilterNarrowsRows(t *testing.T) {
 	if strings.Contains(content, "worker-01") {
 		t.Error("a non-matching row survived the filter")
 	}
-	if !strings.Contains(visibleOnly(content), "1 of 4") {
+	if !strings.Contains(ansi.Strip(content), "1 of 4") {
 		t.Error("the filter count is not shown")
 	}
 }

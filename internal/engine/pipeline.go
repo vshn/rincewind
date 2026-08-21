@@ -32,11 +32,11 @@ func (cv *compiled) runText(ctx context.Context, args Args) (Result, error) {
 	return Result{Lines: lines}, nil
 }
 
-// run is the whole pipeline for one view. Sorting happens on the raw
+// runTable is the whole pipeline for one view. Sorting happens on the raw
 // expression values, before formatting: an RFC 3339 timestamp orders
 // chronologically as a string, a number orders numerically — the rendered
 // cell would order neither.
-func (cv *compiled) run(ctx context.Context, args Args) (Result, error) {
+func (cv *compiled) runTable(ctx context.Context, args Args) (Result, error) {
 	env := cv.env(args)
 	out, err := runScript(ctx, cv.shell, cv.def.Script, env, nil)
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/itchyny/gojq"
 )
@@ -50,7 +51,7 @@ func compileActions(d Def) ([]Action, error) {
 					return nil, err
 				}
 				act.Confirm = func(rows []any, cur Args) (string, error) {
-					v, err := firstValue(context.Background(), code, rows, cur)
+					v, err := exprValue(code, rows, cur)
 					if err != nil {
 						return "", err
 					}
@@ -61,6 +62,20 @@ func compileActions(d Def) ([]Action, error) {
 		out = append(out, act)
 	}
 	return out, nil
+}
+
+// exprTimeout bounds one action expression. Args, Plan and Confirm are
+// evaluated straight from the TUI's Update, which paints nothing while they
+// run, so `while(true; .)` written into a hat would be a frozen tool with no
+// way out. A var rather than a const, so a test need not wait it out.
+var exprTimeout = 2 * time.Second
+
+// exprValue is firstValue under that deadline. Every action expression goes
+// through it; a jq expression is config, and config gets no unbounded turn.
+func exprValue(code *gojq.Code, in any, cur Args) (any, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), exprTimeout)
+	defer cancel()
+	return firstValue(ctx, code, in, cur)
 }
 
 // compileArgs builds the evaluator for a navigating action's parameters.
@@ -77,7 +92,7 @@ func compileArgs(view, where string, exprs map[string]string) (func(any, Args) (
 	return func(src any, cur Args) (Args, error) {
 		out := Args{}
 		for name, code := range codes {
-			v, err := firstValue(context.Background(), code, src, cur)
+			v, err := exprValue(code, src, cur)
 			if err != nil {
 				// A refusal written into the expression — a pool selecting by
 				// expression, say — arrives here. It is the answer, not a
@@ -108,21 +123,33 @@ func compilePlan(d Def, a ActionDef, where string, rowless bool) (func([]any, Ar
 		codes[name] = code
 	}
 
+	// evalEnv is one step's environment: the values the view was opened
+	// with, then the action's own expressions over the input. Planning must
+	// not run anything, so a failing expression is refused here rather than
+	// half-executing the set.
+	evalEnv := func(input any, cur Args) (Args, error) {
+		env := Args{}
+		for name, value := range cur {
+			env[name] = value
+		}
+		for name, code := range codes {
+			v, err := exprValue(code, input, cur)
+			if err != nil {
+				return nil, fmt.Errorf("env %s: %v", name, err)
+			}
+			env[name] = valueText(v)
+		}
+		return env, nil
+	}
+
 	if rowless {
 		return func(_ []any, cur Args) ([]Step, error) {
-			env := Args{}
-			for name, value := range cur {
-				env[name] = value
-			}
 			// No row to evaluate against, so the input is null and the
 			// expressions work from $args — which is where a rowless
 			// action's values come from anyway.
-			for name, code := range codes {
-				v, err := firstValue(context.Background(), code, nil, cur)
-				if err != nil {
-					return nil, fmt.Errorf("env %s: %v", name, err)
-				}
-				env[name] = valueText(v)
+			env, err := evalEnv(nil, cur)
+			if err != nil {
+				return nil, err
 			}
 			// Empty rather than nil: a nil stdin leaves the script attached
 			// to the terminal, where it would eat the user's keystrokes.
@@ -133,18 +160,9 @@ func compilePlan(d Def, a ActionDef, where string, rowless bool) (func([]any, Ar
 	return func(rows []any, cur Args) ([]Step, error) {
 		steps := make([]Step, 0, len(rows))
 		for _, row := range rows {
-			env := Args{}
-			for name, value := range cur {
-				env[name] = value
-			}
-			for name, code := range codes {
-				// Planning must not run anything, so a failing expression is
-				// refused here rather than half-executing the set.
-				v, err := firstValue(context.Background(), code, row, cur)
-				if err != nil {
-					return nil, fmt.Errorf("env %s: %v", name, err)
-				}
-				env[name] = valueText(v)
+			env, err := evalEnv(row, cur)
+			if err != nil {
+				return nil, err
 			}
 
 			// The row itself goes to stdin, so a script needing more than the

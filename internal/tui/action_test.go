@@ -1,10 +1,14 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/vshn/rincewind/internal/engine"
 )
 
 func names(rows []any) []string {
@@ -59,7 +63,7 @@ func TestActionShowsTheCommandBeforeAsking(t *testing.T) {
 		t.Error("the action ran before it was confirmed")
 	}
 
-	content := visibleOnly(m.View().Content)
+	content := ansi.Strip(m.View().Content)
 	for _, want := range []string{"name=infra", "sh -c", "echo", "Pause 1", "1 row", "[y/N]"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("the screen is missing %q", want)
@@ -128,7 +132,7 @@ func TestOutputLandsInTheJobTab(t *testing.T) {
 	m.Update(key("p"))
 	press(t, m, "y")
 
-	content := visibleOnly(m.View().Content)
+	content := ansi.Strip(m.View().Content)
 	if !strings.Contains(content, "patched infra") {
 		t.Error("what the script printed is not on screen")
 	}
@@ -138,8 +142,36 @@ func TestOutputLandsInTheJobTab(t *testing.T) {
 
 	// Back on the view, the rows are untouched by any of it.
 	m.Update(key("esc"))
-	if got := visibleOnly(m.View().Content); strings.Contains(got, "patched infra") {
+	if got := ansi.Strip(m.View().Content); strings.Contains(got, "patched infra") {
 		t.Error("the action's output leaked into the view")
+	}
+}
+
+// A job that was cut short renders three different states in a row: what a
+// step printed, how one failed, and that the rest were never attempted —
+// "(no output)" would read as a step that ran and said nothing. The summary
+// counts both, because neither of them did what was asked.
+func TestJobLinesTellsRanFromNotRun(t *testing.T) {
+	j := &job{
+		action: engine.Action{Name: "patch"},
+		steps: []engine.Step{
+			{Row: "infra", Script: "echo one"},
+			{Row: "apps", Script: "echo two"},
+			{Row: "test", Script: "echo three"},
+		},
+		out:  [][]string{{"patched infra"}, nil, nil},
+		errs: []error{nil, fmt.Errorf("exit status 1"), fmt.Errorf("not run: context canceled")},
+		done: true,
+	}
+
+	got := ansi.Strip(strings.Join(j.lines(""), "\n"))
+	for _, want := range []string{"patched infra", "exit status 1", "not run: context canceled", "2 of 3 steps failed"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the job does not say %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "(no output)") {
+		t.Errorf("a step that never ran reads as one that printed nothing:\n%s", got)
 	}
 }
 
@@ -187,7 +219,7 @@ func TestJobTabOffersNoActions(t *testing.T) {
 // the content box, and its text is the line before its bottom border.
 func actionBoxLine(m *model) string {
 	lines := strings.Split(m.View().Content, "\n")
-	return visibleOnly(lines[titleHeight+m.bodyBoxHeight()+m.actionBoxHeight()-2])
+	return ansi.Strip(lines[titleHeight+m.bodyBoxHeight()+m.actionBoxHeight()-2])
 }
 
 // The actions get a framed box of their own, under the output.
@@ -203,7 +235,7 @@ func TestActionsAreShownInTheirOwnBox(t *testing.T) {
 
 	// The box is framed: a border of its own above and below.
 	lines := strings.Split(m.View().Content, "\n")
-	top := visibleOnly(lines[titleHeight+m.bodyBoxHeight()])
+	top := ansi.Strip(lines[titleHeight+m.bodyBoxHeight()])
 	if !strings.Contains(top, "╭") {
 		t.Errorf("the action box has no top border: %q", top)
 	}
@@ -228,7 +260,7 @@ func TestConfirmationSitsUnderTheCommand(t *testing.T) {
 	m.Update(key("space"))
 	m.Update(key("p"))
 
-	content := visibleOnly(m.View().Content)
+	content := ansi.Strip(m.View().Content)
 	command := strings.Index(content, "echo")
 	question := strings.Index(content, "[y/N]")
 	switch {

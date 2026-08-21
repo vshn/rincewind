@@ -18,7 +18,7 @@ echo '{"name":"api","points":[[1755601800,3]]}'`,
 		Rows: ".",
 	})
 
-	if !res.Chart() {
+	if !res.IsChart() {
 		t.Fatal("the result does not read as a chart")
 	}
 	if len(res.Series) != 1 {
@@ -67,7 +67,7 @@ echo '{"points":[[1755600000,1]]}'`,
 // the CLI switch on, and it must not depend on the cluster having data.
 func TestChartStaysAChartWhenEmpty(t *testing.T) {
 	res := runDef(t, Def{ID: "t", Chart: true, Script: "true", Rows: "."})
-	if !res.Chart() || len(res.Series) != 0 {
+	if !res.IsChart() || len(res.Series) != 0 {
 		t.Fatalf("got %+v, want an empty chart result", res)
 	}
 }
