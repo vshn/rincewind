@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/vshn/rincewind/internal/engine"
 )
@@ -43,7 +44,7 @@ func TestTextFilterGrepsTheLines(t *testing.T) {
 	m := showing(t)
 	typeFilter(m, "error")
 
-	content := visibleOnly(m.View().Content)
+	content := ansi.Strip(m.View().Content)
 	if !strings.Contains(content, "liveness probe failed") {
 		t.Error("the matching line is gone")
 	}
@@ -95,7 +96,7 @@ func TestTextViewHasNoSelection(t *testing.T) {
 	if n := len(m.cur().selection); n != 0 {
 		t.Errorf("%d rows selected in a view that has none", n)
 	}
-	if strings.Contains(visibleOnly(m.View().Content), "selected") {
+	if strings.Contains(ansi.Strip(m.View().Content), "selected") {
 		t.Error("the status line offers a selection")
 	}
 }

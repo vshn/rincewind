@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/vshn/rincewind/internal/engine"
+	"github.com/vshn/rincewind/internal/render"
 )
 
 // actionFor resolves a key to an action of the view on screen. It only
@@ -150,7 +151,7 @@ func (m *model) plan(t *tab) tea.Cmd {
 	// A rowless action is exactly one step, and that step is on screen.
 	j.prompt = prompt
 	if j.action.NeedsRows() {
-		j.prompt = fmt.Sprintf("%s (%s)", prompt, plural(len(j.rows), "row"))
+		j.prompt = fmt.Sprintf("%s (%s)", prompt, render.Plural(len(j.rows), "row"))
 	}
 	m.showResult()
 	return nil
@@ -347,17 +348,10 @@ func (j *job) summary() string {
 		}
 	}
 	if failed > 0 {
-		return errStyle.Render(fmt.Sprintf("%d of %s failed", failed, plural(len(j.steps), "step")))
+		return errStyle.Render(fmt.Sprintf("%d of %s failed", failed, render.Plural(len(j.steps), "step")))
 	}
-	return goodStyle.Render(fmt.Sprintf("%s ok", plural(len(j.steps), "step")))
+	return goodStyle.Render(fmt.Sprintf("%s ok", render.Plural(len(j.steps), "step")))
 }
 
 // label names the job tab.
 func (j *job) label() string { return j.action.Name }
-
-func plural(n int, what string) string {
-	if n == 1 {
-		return fmt.Sprintf("%d %s", n, what)
-	}
-	return fmt.Sprintf("%d %ss", n, what)
-}

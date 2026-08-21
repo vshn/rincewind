@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/vshn/rincewind/internal/engine"
 )
@@ -101,7 +102,7 @@ func (m *model) tabBar(avail int) (string, []tabHit) {
 		if i > from {
 			b.WriteString(dividerStyle.Render("│"))
 		}
-		x0 := lipgloss.Width(visibleOnly(b.String()))
+		x0 := lipgloss.Width(b.String())
 		if i == m.act {
 			b.WriteString(tabStyle.Render(plain[i]))
 		} else {
@@ -184,7 +185,7 @@ func (m *model) actionLine() string {
 
 	// Nothing to act on yet: show the bindings, but do not pretend they work.
 	if t.res == nil || t.running || m.focus != paneOutput {
-		return dividerStyle.Render(visibleOnly(line))
+		return dividerStyle.Render(ansi.Strip(line))
 	}
 	return line
 }

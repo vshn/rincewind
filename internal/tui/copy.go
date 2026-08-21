@@ -65,12 +65,12 @@ func (m *model) copyLines() (lines []string, what string) {
 		for _, line := range t.job.lines("") {
 			lines = append(lines, strings.TrimRight(ansi.Strip(line), " \t"))
 		}
-		return lines, plural(len(lines), "line")
+		return lines, render.Plural(len(lines), "line")
 	}
 
 	vis := m.visible()
 	if vis.Text() {
-		return vis.Lines, plural(len(vis.Lines), "line")
+		return vis.Lines, render.Plural(len(vis.Lines), "line")
 	}
 
 	// A chart copies as it shows — the braille plot with its legend — drawn
@@ -80,7 +80,7 @@ func (m *model) copyLines() (lines []string, what string) {
 		for _, line := range render.Chart(vis, m.contentWidth(), m.vpHeight(), false) {
 			lines = append(lines, strings.TrimRight(line, " "))
 		}
-		return lines, plural(len(lines), "line")
+		return lines, render.Plural(len(lines), "line")
 	}
 
 	rows := vis.Rows
@@ -100,7 +100,7 @@ func (m *model) copyLines() (lines []string, what string) {
 	// The header comes along: a table of values whose columns are unnamed is
 	// a table one has to remember the shape of.
 	vis.Rows = rows
-	return render.Table(vis, render.Style{}), plural(len(rows), "row")
+	return render.Table(vis, render.Style{}), render.Plural(len(rows), "row")
 }
 
 // clipboardTools are the local clipboard writers, in the order they are

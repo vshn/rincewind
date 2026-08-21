@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // typeText sends a word one keystroke at a time, the way the user does.
@@ -44,7 +45,7 @@ func TestFormIsAskedBeforePlanning(t *testing.T) {
 	if len(rec.planArgs) != 0 {
 		t.Errorf("planned %v before the form was filled in", rec.planArgs)
 	}
-	content := visibleOnly(m.View().Content)
+	content := ansi.Strip(m.View().Content)
 	for _, want := range []string{"create", "(1 of 2)", "pool name", "name:"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("the form is missing %q", want)
@@ -62,7 +63,7 @@ func TestAnsweredFieldsStayOnScreen(t *testing.T) {
 	typeText(m, "infra")
 	m.Update(key("enter"))
 
-	content := visibleOnly(m.View().Content)
+	content := ansi.Strip(m.View().Content)
 	if !strings.Contains(content, "name: infra") {
 		t.Error("the answered field is not on screen")
 	}
@@ -157,7 +158,7 @@ func TestCollectedValuesReachTheCommand(t *testing.T) {
 	m.Update(key("enter"))
 	m.Update(key("enter")) // take the default
 
-	content := visibleOnly(m.View().Content)
+	content := ansi.Strip(m.View().Content)
 	for _, want := range []string{"name=infra", "size=3", "Create pool infra", "[y/N]"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("the screen is missing %q", want)
@@ -171,7 +172,7 @@ func TestCollectedValuesReachTheCommand(t *testing.T) {
 	if !m.cur().job.done {
 		t.Fatal("y did not run it")
 	}
-	if !strings.Contains(visibleOnly(m.View().Content), "created infra/3") {
+	if !strings.Contains(ansi.Strip(m.View().Content), "created infra/3") {
 		t.Error("the output is not on screen")
 	}
 }

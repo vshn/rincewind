@@ -1658,7 +1658,7 @@ func (m *model) titleLine() string {
 				descStyle.Render(j.action.Short))
 		}
 		return m.withCluster(name + sep + titleStyle.Render(j.action.Name) + sep +
-			descStyle.Render(plural(len(j.steps), "step")))
+			descStyle.Render(render.Plural(len(j.steps), "step")))
 	}
 	cur := m.cur().view
 	if cur == nil {
@@ -1965,23 +1965,5 @@ func fitKeys(keys []helpKey, avail int) string {
 			}
 		}
 		keys = append(keys[:drop], keys[drop+1:]...)
-	}
-}
-
-// visibleOnly strips styling so tests can assert on what the user reads.
-func visibleOnly(s string) string {
-	var b strings.Builder
-	for {
-		i := strings.Index(s, "\x1b[")
-		if i < 0 {
-			b.WriteString(s)
-			return b.String()
-		}
-		b.WriteString(s[:i])
-		j := strings.IndexByte(s[i:], 'm')
-		if j < 0 {
-			return b.String()
-		}
-		s = s[i+j+1:]
 	}
 }

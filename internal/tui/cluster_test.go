@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // probing builds a model with a stubbed probe and counts how often it ran.
@@ -29,7 +30,7 @@ func TestClusterShowsTopRight(t *testing.T) {
 	m, _ := probing(t, "albedaran")
 	m.Update(clusterMsg{name: "albedaran"})
 
-	top := visibleOnly(strings.Split(m.View().Content, "\n")[1])
+	top := ansi.Strip(strings.Split(m.View().Content, "\n")[1])
 	if !strings.Contains(top, "albedaran") {
 		t.Fatalf("the title bar does not name the cluster: %q", top)
 	}
@@ -51,7 +52,7 @@ func TestNarrowBarDropsTheClusterWhole(t *testing.T) {
 	m = next.(*model)
 	m.Update(clusterMsg{name: "a-rather-long-context-name"})
 
-	top := visibleOnly(strings.Split(m.View().Content, "\n")[1])
+	top := ansi.Strip(strings.Split(m.View().Content, "\n")[1])
 	if strings.Contains(top, "a-rather") {
 		t.Errorf("a clipped cluster name survived: %q", top)
 	}
@@ -64,7 +65,7 @@ func TestTitleYieldsToTheCluster(t *testing.T) {
 	m = next.(*model)
 	m.Update(clusterMsg{name: "albedaran"})
 
-	top := visibleOnly(strings.Split(m.View().Content, "\n")[1])
+	top := ansi.Strip(strings.Split(m.View().Content, "\n")[1])
 	if !strings.Contains(top, "albedaran") {
 		t.Errorf("the cluster gave way to the view title: %q", top)
 	}
@@ -79,7 +80,7 @@ func TestNoClusterShowsNothing(t *testing.T) {
 	m.Update(clusterMsg{})
 
 	// Nothing between the view's title and the frame's right edge.
-	top := visibleOnly(strings.Split(m.View().Content, "\n")[1])
+	top := ansi.Strip(strings.Split(m.View().Content, "\n")[1])
 	if !strings.HasSuffix(strings.TrimRight(top, "│ "), "One quick row") {
 		t.Errorf("something sits where the cluster would be: %q", top)
 	}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/vshn/rincewind/internal/config"
 	"github.com/vshn/rincewind/internal/hats"
+	"github.com/vshn/rincewind/internal/render"
 )
 
 // hatsDirFlag overrides where the store lives.
@@ -242,7 +243,7 @@ func report(out io.Writer, c hats.Clone) error {
 			continue
 		}
 		ok++
-		say(out, "  %-14s %-10s %s\n", h.Name, plural(len(views), "view"), short(h.Path))
+		say(out, "  %-14s %-10s %s\n", h.Name, render.Plural(len(views), "view"), short(h.Path))
 	}
 	if ok == 0 {
 		return fmt.Errorf("no hat in %s loads", c.Slug)
@@ -257,13 +258,6 @@ func report(out io.Writer, c hats.Clone) error {
 // itself reports its failures through the error it returns.
 func say(w io.Writer, format string, args ...any) {
 	_, _ = fmt.Fprintf(w, format, args...)
-}
-
-func plural(n int, what string) string {
-	if n == 1 {
-		return fmt.Sprintf("1 %s", what)
-	}
-	return fmt.Sprintf("%d %ss", n, what)
 }
 
 // short writes a path the way one would say it. The store lives under the

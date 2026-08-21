@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/vshn/rincewind/internal/engine"
 )
@@ -298,7 +299,7 @@ func TestTabsAreShownInTheContentBorder(t *testing.T) {
 	m.Update(key("enter"))
 	deliver(t, m, longTable())
 
-	border := visibleOnly(strings.Split(m.View().Content, "\n")[titleHeight])
+	border := ansi.Strip(strings.Split(m.View().Content, "\n")[titleHeight])
 	for _, want := range []string{"pools", "nodes", "▸"} {
 		if !strings.Contains(border, want) {
 			t.Errorf("tab bar %q missing %q", border, want)
@@ -311,7 +312,7 @@ func TestClickOnATabActivatesIt(t *testing.T) {
 	m.Update(key("enter"))
 	deliver(t, m, longTable())
 
-	border := visibleOnly(strings.Split(m.View().Content, "\n")[titleHeight])
+	border := ansi.Strip(strings.Split(m.View().Content, "\n")[titleHeight])
 	m.Update(click(colOf(t, border, "pools"), titleHeight))
 
 	if m.act != 0 {

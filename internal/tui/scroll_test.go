@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/vshn/rincewind/internal/engine"
 )
@@ -31,7 +32,7 @@ func body(m *model) []string {
 	var out []string
 	for _, line := range strings.Split(m.View().Content, "\n") {
 		// The two boxes meet at "││"; everything after that is the content.
-		if plain := visibleOnly(line); strings.Contains(plain, "││") {
+		if plain := ansi.Strip(line); strings.Contains(plain, "││") {
 			out = append(out, strings.SplitN(plain, "││", 2)[1])
 		}
 	}
@@ -44,7 +45,7 @@ func body(m *model) []string {
 func sidebar(m *model) string {
 	var out []string
 	for _, line := range strings.Split(m.View().Content, "\n") {
-		if plain := visibleOnly(line); strings.Contains(plain, "││") {
+		if plain := ansi.Strip(line); strings.Contains(plain, "││") {
 			out = append(out, strings.SplitN(plain, "││", 2)[0])
 		}
 	}
@@ -136,7 +137,7 @@ func TestScrollPositionIsShownInTheFrame(t *testing.T) {
 	m.Update(key("end"))
 
 	border := strings.Split(m.View().Content, "\n")[3]
-	if got := visibleOnly(border); !strings.Contains(got, "/40") {
+	if got := ansi.Strip(border); !strings.Contains(got, "/40") {
 		t.Errorf("frame %q carries no scroll position", got)
 	}
 }
