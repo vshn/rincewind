@@ -216,7 +216,7 @@ views:
                              # dot groups the sidebar, the rest is the menu
                              # label — an id without a dot is ungrouped
     title: Argo applications # description, shown in the title bar; default: id
-    class: table             # optional; table (default) or text
+    class: table             # optional; table (default), text or chart
     refresh: 30s             # optional auto-reload; manual r always works
     follow: false            # optional; text only, and excludes refresh
     source:
@@ -316,6 +316,74 @@ The two shipped log views follow, and read `--tail 5000` on the way in.
 One of them pipes through `grep`, which needs `--line-buffered`:
 a pipe makes grep hold its output back in 4k blocks,
 and a followed log delivered in blocks is a followed log that looks stuck.
+
+## Chart views
+
+`class: chart` reads the same JSON stream as a table,
+but `rows` shapes it into **series** rather than rows:
+
+```yaml
+- id: nodes.cpu
+  class: chart
+  yrange: [0, 100]        # optional; omitted, the axis scales to the data
+  source:
+    script: |
+      curl -sf … /api/v1/query_range …
+  rows: .data.result[] | {name: .metric.instance, points: .values}
+```
+
+Each value the expression yields must be a series object —
+`{name, points: [[t, v], …]}` —
+which is exactly what a Prometheus `query_range` response reduces to
+in one jq step.
+The engine meets the data where it is:
+`t` is unix seconds or an RFC 3339 string,
+`v` a number **or a string holding one**,
+because strings are how Prometheus encodes samples in JSON.
+Prometheus itself is never named in Go —
+where the numbers come from is hat business,
+which is why the class is called `chart` and not `prometheus`.
+
+The series are drawn as a braille time-series plot
+(via [ntcharts](https://github.com/NimbleMarkets/ntcharts), the one chart
+dependency), with a legend naming each series in its colour.
+Three semantics are decisions rather than details:
+
+- **Script order is draw order, later series on top.**
+  The engine never reorders series
+  (points are sorted by time; nothing else is reshaped),
+  and the renderer draws them in that order deliberately —
+  `DrawBrailleAll` would iterate a Go map and roll the z-order per repaint.
+  A hat that pairs a `max_over_time` band with an `avg_over_time` line
+  emits max first, so the spikes lie under the line that tells the trend.
+- **Spikes must survive the query, not the renderer.**
+  The braille path draws every point,
+  but a `query_range` step samples —
+  a spike between two steps never reaches the tool at all.
+  A hat that wants outliers visible over a week aggregates per bucket
+  (`max_over_time(m[30m:5m])` beside `avg_over_time`)
+  instead of hoping the renderer can show what the query dropped.
+- **`yrange` fixes the value axis.**
+  Two charts of a bounded quantity should read against the same scale,
+  and a pool of idle nodes hugging a 0–100 axis *is* the answer.
+  Left out, the axis scales to the data.
+
+A series name appearing again extends that series,
+so a script may deliver one node's week in chunks.
+A malformed series becomes a note and is skipped,
+and unreadable points are dropped with one note per series —
+the same philosophy as a broken column:
+a data problem at run time must not take down the view.
+
+What holds for a text view holds here, for the same reason — no rows:
+no selection, no cursor, only `scope: none` actions,
+and the arrows scroll.
+The filter picks **series by name** —
+`/worker` is how one node's line is read out of a pool.
+`refresh` works; `follow` does not, since a plot is drawn whole.
+The chart is rendered to the pane's size and redrawn on resize;
+`rincewind view` prints it at a fixed 100×20,
+coloured only when stdout is a terminal.
 
 ## Copying the pane
 
@@ -748,6 +816,12 @@ example/           a hat that invents its data, and the config fixture
 | New lines pin to the bottom only from the bottom | A reader who has scrolled up is reading |
 | A text view keeps its lines verbatim | Collapsing whitespace or padding a column would destroy the indentation a log is read by; that is why it is a class of its own rather than a one-column table |
 | A text view refuses rows, columns, sort and key | Accepting a field nothing reads teaches the wrong thing about the schema |
+| The chart class is `chart`, not `prometheus` or `metrics` | The class names the shape of the output, never the producer; where the numbers come from is hat business, like kubectl |
+| Chart series stay in script order, drawn later-on-top | The z-order is a statement — max band under avg line — and a map iteration would roll it per repaint |
+| Outliers are the query's job, not the renderer's | The renderer draws every point it gets, but a sampling query drops the spike before the tool ever sees it; `max_over_time` per bucket is the hat's answer |
+| `yrange` may fix a chart's value axis | Two charts of one bounded quantity should read against the same scale; an idle pool hugging 0–100 is the answer, not a display problem |
+| The chart filter picks series by name | /worker reading one node out of a pool is the chart's version of grep |
+| ntcharts draws the plot | Braille doubles the resolution and it is built on the same charm.land v2 stack; hand-rolling a line chart is real work the dependency already did |
 | Views are config, not Go | The tool's owner wants to add views without recompiling; the error-message cost is paid explicitly (see above) |
 | Script is the only source form | One execution path; the hat shows exactly what runs, shell choice included |
 | stdout is a JSON stream | Multi-source views without forcing the script to merge |

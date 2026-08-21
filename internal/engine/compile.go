@@ -21,6 +21,12 @@ type Def struct {
 	// Text takes the script's stdout as lines rather than as JSON, which is
 	// what a log is. Rows, Key, Columns and Sort are then all empty.
 	Text bool
+	// Chart reads the stream as series to draw rather than rows to list.
+	// Rows shapes each stream value into series objects; Key, Columns and
+	// Sort are empty, as they are for text.
+	Chart bool
+	// YRange fixes a chart's value axis; nil scales it to the data.
+	YRange *[2]float64
 	// Follow consumes that output as it is written instead of when the
 	// script exits. Only a text view may.
 	Follow  bool
@@ -109,6 +115,12 @@ func Compile(d Def) (View, error) {
 	var err error
 	if cv.rows, err = compileExpr(d.ID, "rows", d.Rows); err != nil {
 		return View{}, err
+	}
+
+	// A chart shapes the stream into series rather than rows; columns and
+	// sort do not apply, and the config has already refused them.
+	if d.Chart {
+		return newView(d, cv.runChart)
 	}
 	if d.Key != "" {
 		if cv.key, err = compileExpr(d.ID, "key", d.Key); err != nil {

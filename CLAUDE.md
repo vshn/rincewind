@@ -16,6 +16,8 @@ A working action gets a tab that collects its parameters,
 shows the commands, asks, and holds the output.
 All 16 of the previous generation's views are ported,
 the two log views as followed text views.
+`class: chart` draws time series in braille (via ntcharts);
+`example/metrics.yaml` is the reference.
 TUI only.
 
 Not built yet: batched (`once:`) actions; CLI output mode;
@@ -35,6 +37,11 @@ sort, emphasis, parameters, actions.
 a log, verbatim, with no rows and so no selection.
 `follow: true` reads those lines as the script writes them;
 text only, and it excludes `refresh`.
+`class: chart` shapes the stream into series —
+`rows` yields `{name, points: [[t, v], …]}` objects —
+drawn as a braille time-series plot with a legend.
+No rows, so no selection: `/` picks series by name,
+actions need `scope: none`, and `yrange:` fixes the value axis.
 
 An **action** does something with the rows a view is showing.
 One mechanism, two kinds:
@@ -71,6 +78,12 @@ Both kinds of action open a tab; `esc` closes it.
 - **A text view's lines are never reshaped.**
   No `oneLine`, no column padding, no truncation:
   the indentation is what a log is read by.
+- **A chart's series stay in script order, drawn later-on-top.**
+  The z-order is a statement — max band under avg line —
+  so the engine sorts points by time and reshapes nothing else.
+  Outliers are the query's business (`max_over_time` per bucket);
+  the renderer only draws what survived it.
+  The class is `chart`, never `prometheus`: producers are hat business.
 - **A followed view has `Stream` and no `Run`**, and the reverse for a snapshot.
   One field set, never both, so nothing has to guess which shape it holds.
 - **Only one script follows per tab, and none behind a background tab.**

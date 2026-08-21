@@ -195,6 +195,36 @@ func textViews() []engine.View {
 	}}
 }
 
+// chartSeries invents a day of two nodes' load: enough points to draw, one
+// name to filter for.
+func chartSeries() engine.Result {
+	base := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	mk := func(name string, vs ...float64) engine.Series {
+		s := engine.Series{Name: name}
+		for i, v := range vs {
+			s.Points = append(s.Points, engine.Point{T: base.Add(time.Duration(i) * time.Hour), V: v})
+		}
+		return s
+	}
+	return engine.Result{
+		Series: []engine.Series{
+			mk("worker-01", 20, 25, 90, 30, 20, 25),
+			mk("infra-0", 10, 10, 12, 11, 10, 10),
+		},
+		YRange: &[2]float64{0, 100},
+	}
+}
+
+// chartViews is one chart view, for the paths that draw series.
+func chartViews() []engine.View {
+	return []engine.View{{
+		ID: "demo.load", Name: "load", Title: "Load per node", Group: "demo",
+		Run: func(context.Context, engine.Args) (engine.Result, error) {
+			return chartSeries(), nil
+		},
+	}}
+}
+
 // sampleViews is the stand-in the layout and interaction tests run against.
 // In-memory views rather than parsed config, so the tests need no shell; the
 // engine's own tests cover the script path.

@@ -54,9 +54,9 @@ type Row struct {
 	Key   string
 }
 
-// Result is what a view produces: rows shaped into columns, or plain lines
-// for a text view. Notes carry per-cell evaluation problems: one broken
-// expression must not take down the other 199 rows.
+// Result is what a view produces: rows shaped into columns, plain lines for
+// a text view, or series for a chart. Notes carry per-value evaluation
+// problems: one broken expression must not take down the other 199 rows.
 type Result struct {
 	Cols  []string
 	Rows  []Row
@@ -64,12 +64,34 @@ type Result struct {
 
 	// Lines is a text view's output, verbatim: no columns, no jq, and no
 	// collapsing of whitespace, because in a log the indentation is part of
-	// what is being read. A result carries rows or lines, never both.
+	// what is being read. A result carries exactly one of rows, lines or
+	// series.
 	Lines []string
+
+	// Series is a chart view's output: named lines over time. YRange is the
+	// axis the config asked for; nil scales to the data.
+	Series []Series
+	YRange *[2]float64
 }
 
 // Text reports which shape this is.
 func (r Result) Text() bool { return r.Lines != nil }
+
+// Chart reports whether this is a chart view's result.
+func (r Result) Chart() bool { return r.Series != nil }
+
+// Series is one named line of a chart: measurements in time order. The name
+// is the legend label, and what the filter matches.
+type Series struct {
+	Name   string
+	Points []Point
+}
+
+// Point is one measurement.
+type Point struct {
+	T time.Time
+	V float64
+}
 
 // Args are the parameters a view instance was opened with. They reach the
 // view's script as environment variables, never as text templated into it:

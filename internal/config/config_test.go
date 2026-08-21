@@ -22,6 +22,27 @@ views:
       - by: NAME
 `
 
+// chart is a minimal correct chart view the failure cases are derived from.
+// The points carry the shapes a real hat produces: unix seconds beside an
+// RFC 3339 string, and a Prometheus-style string-encoded sample beside a
+// number.
+const chart = `
+views:
+  - id: demo.load
+    class: chart
+    yrange: [0, 100]
+    source:
+      script: |
+        echo '{"name":"api","points":[[1755600000,"41.5"],[1755600900,62]]}'
+        echo '{"name":"db","points":[["2026-08-19T12:00:00Z",7]]}'
+    rows: .
+    actions:
+      - key: p
+        name: refit
+        scope: none
+        script: echo refit
+`
+
 func TestValidConfigCompiles(t *testing.T) {
 	views, err := Parse(strings.NewReader(valid))
 	if err != nil {
@@ -88,8 +109,8 @@ func TestBrokenConfigsFailWithContext(t *testing.T) {
 		},
 		{
 			name: "bad class",
-			yaml: strings.Replace(valid, "key: .name", "key: .name\n    class: chart", 1),
-			want: []string{"demo.list", "chart"},
+			yaml: strings.Replace(valid, "key: .name", "key: .name\n    class: pie", 1),
+			want: []string{"demo.list", "pie"},
 		},
 		{
 			name: "refresh too fast",
@@ -140,6 +161,34 @@ func TestBrokenConfigsFailWithContext(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The same end-to-end path for a chart: the stream becomes series, in script
+// order, with both time spellings and Prometheus' string-encoded samples read.
+func TestParsedChartRuns(t *testing.T) {
+	views, err := Parse(strings.NewReader(chart))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := views[0].Run(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Chart() {
+		t.Fatal("the result does not read as a chart")
+	}
+	if len(res.Notes) > 0 {
+		t.Fatalf("notes on clean input: %v", res.Notes)
+	}
+	if len(res.Series) != 2 || res.Series[0].Name != "api" || res.Series[1].Name != "db" {
+		t.Fatalf("got %+v, want the series api and db in script order", res.Series)
+	}
+	if pts := res.Series[0].Points; len(pts) != 2 || pts[0].V != 41.5 || pts[1].V != 62 {
+		t.Fatalf("api points %+v, want 41.5 then 62", pts)
+	}
+	if res.YRange == nil || res.YRange[1] != 100 {
+		t.Fatalf("yrange %v did not survive to the result", res.YRange)
 	}
 }
 
