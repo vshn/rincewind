@@ -162,6 +162,25 @@ func TestSidebarScrollsWithTheCursor(t *testing.T) {
 	}
 }
 
+// The help only offers the keys that would do something, and the answer now
+// comes from the width recorded while the result was laid out — so it has to
+// follow the result rather than the one it was first measured on.
+func TestScrollableFollowsTheResult(t *testing.T) {
+	m := scrolling(t)
+	if !m.scrollable() {
+		t.Fatal("a table wider than its box does not count as scrollable")
+	}
+
+	// The same view, narrow enough to fit: nothing is past the edge now.
+	m.Update(resultMsg{seq: m.cur().seq, res: engine.Result{
+		Cols: []string{"NAME"},
+		Rows: []engine.Row{row("worker-01")},
+	}})
+	if m.scrollable() {
+		t.Error("a table that fits still counts as scrollable")
+	}
+}
+
 // Scrolling must not disturb the frames: every line stays window-wide.
 func TestScrolledLayoutKeepsItsWidth(t *testing.T) {
 	m := scrolling(t)

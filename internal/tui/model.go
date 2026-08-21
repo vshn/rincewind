@@ -278,6 +278,9 @@ type model struct {
 	head string
 	// lines is how many lines the viewport holds, for the position label.
 	lines int
+	// widest is the widest of them, so the help line can say whether there
+	// is anything past the right edge without measuring it all again.
+	widest int
 	// sideTop is the first sidebar line on screen, for menus taller than
 	// their box.
 	sideTop int
@@ -1489,9 +1492,7 @@ func (m *model) showResult() {
 	// A job tab shows commands and their output, not rows.
 	if t := m.cur(); t.job != nil {
 		lines := t.job.lines(m.input.View())
-		m.head = ""
-		m.vp.SetContentLines(lines)
-		m.lines = len(lines)
+		m.setContent("", lines)
 		return
 	}
 
@@ -1506,9 +1507,7 @@ func (m *model) showResult() {
 		if t := m.cur(); t.ended {
 			lines = append(append([]string{}, lines...), m.endMarker(t))
 		}
-		m.head = ""
-		m.vp.SetContentLines(lines)
-		m.lines = len(lines)
+		m.setContent("", lines)
 		return
 	}
 
@@ -1522,9 +1521,7 @@ func (m *model) showResult() {
 		for _, note := range vis.Notes {
 			lines = append(lines, noteStyle.Render("! "+note))
 		}
-		m.head = ""
-		m.vp.SetContentLines(lines)
-		m.lines = len(lines)
+		m.setContent("", lines)
 		return
 	}
 
@@ -1537,7 +1534,7 @@ func (m *model) showResult() {
 	lines := render.Table(vis, m.tableStyle(vis, cursor))
 	// The header comes out of the scrolling area and is painted onto the
 	// frame's first row instead.
-	m.head, lines = lines[0], lines[1:]
+	head, lines := lines[0], lines[1:]
 
 	// Cell evaluation problems ride below the table instead of replacing
 	// it: a half-broken view is still mostly a view.
@@ -1545,9 +1542,23 @@ func (m *model) showResult() {
 		lines = append(lines, noteStyle.Render("! "+note))
 	}
 
+	m.setContent(head, lines)
+	m.followCursor(cursor)
+}
+
+// setContent hands the viewport what it is to show, and records what the
+// chrome needs to know about it: how many lines there are, and how wide the
+// widest of them is. The width is measured here, once per result, rather
+// than by rendering the whole table again on every paint of the help line.
+func (m *model) setContent(head string, lines []string) {
+	m.head = head
 	m.vp.SetContentLines(lines)
 	m.lines = len(lines)
-	m.followCursor(cursor)
+
+	m.widest = lipgloss.Width(head)
+	for _, line := range lines {
+		m.widest = max(m.widest, lipgloss.Width(line))
+	}
 }
 
 // endMarker says why a followed view stopped producing.
@@ -1871,15 +1882,7 @@ func (m *model) scrollable() bool {
 	if m.hasChart() {
 		return false
 	}
-	if m.vp.XOffset() > 0 {
-		return true
-	}
-	for _, line := range render.Table(m.visible(), render.Style{}) {
-		if lipgloss.Width(line) > m.contentWidth() {
-			return true
-		}
-	}
-	return false
+	return m.vp.XOffset() > 0 || m.widest > m.contentWidth()
 }
 
 // helpKey is one entry of the key legend. Lower weights are dropped first
