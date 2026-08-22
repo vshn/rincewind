@@ -704,25 +704,44 @@ the first declared is the last to go.
 Nothing is hidden on its account, so there is nothing to explain;
 `check` is where it is reported, with the script's own stderr.
 
-### The kubectl context, now the fallback
+### No producer is named in Go
 
-A hat that declares no contexts still gets its cluster shown:
-`kubectl config current-context`, read the one way Go knows.
-That keeps every hat written before contexts existed exactly as it was;
-taking the Go special case away altogether
-is a later decision, to be taken on its own.
+This is where `kubectl config current-context` used to live,
+and it was the one place in the tool's own code that named a producer.
+The exception was defended for a long time on the grounds that
+*which* cluster one is pointed at cannot come from the hat.
 
-**The context, never reachability.**
-`current-context` reads `~/.kube/config` and answers in tens of milliseconds,
-where asking the API server whether it is up costs a round trip on every view
-change — and would blank the display exactly when a cluster is unwell,
-which is when knowing which cluster it is matters most.
-Whether it answers at all is what running a view already tells you.
+Contexts settle that differently, and better.
+The hat supplies the question — a script, and jq over what it printed —
+and the world supplies the answer,
+so the tool learns where it is without knowing what a cluster is.
+A hat pointed at a cloud API, a database or nothing at all
+gets a chrome describing the world it is actually in,
+where the kubectl probe could only ever describe one world
+and would sit there empty in every other.
 
-**No answer means nothing is shown**, and no room is taken.
-No kubectl, or no current context, is not a cluster session;
-a probe that fails has nothing one could act on,
-and a broken cluster is reported by the views themselves.
+So the rule is now flat: **outside `internal/hats`, no external program is
+named in Go.** The engine runs `source.shell` with `source.script` and
+decodes JSON. `check` probes what `tools:` lists, and the names come from
+the hat. The clipboard writers are the one remaining exception, and they are
+about the machine the person is sitting at, never about what a hat is
+pointed at.
+
+What follows from it:
+
+- **A hat that declares no contexts shows nothing top right**, and takes no
+  room for it. That is the correct answer rather than a gap: the tool has not
+  been told how to find out, and guessing is what this whole construct exists
+  to stop.
+- **`internal/hats` is the only package that reaches a remote system** — the
+  GitHub topic search, one constant and one URL — and the only one that names
+  git and ssh. Managing hats is the one job that cannot be a hat's own script.
+- **The context, never reachability**, still holds and is now the hat's
+  business: a probe should read something local and answer in tens of
+  milliseconds. Asking an API server whether it is up costs a round trip on
+  every view change, and would blank the display exactly when a cluster is
+  unwell — which is when knowing which cluster it is matters most. Whether it
+  answers at all is what running a view already tells you.
 
 ## Getting a hat
 
@@ -1091,6 +1110,7 @@ example/           a hat that invents its data, and the config fixture
 | An action parameter may not shadow the view's or an `env:` name | Then the precedence is unobservable, and there is one fewer rule to remember |
 | Per-row invocations replace the old `kubectl -f -` List document | Each call names one object, so a partial failure is attributable |
 | The argo "root rider" is an instruction, not a hidden mutation | The old pause silently patched `root` too; a mutation nobody selected is what the selection rule exists to prevent |
+| No producer is named in Go at all; the kubectl probe was removed rather than kept as a fallback | It was the one place the tool's own code claimed to know what the world is made of, and it described one world while a hat may be pointed at any; a hat that declares no contexts shows nothing, which is the honest answer |
 | One construct — contexts — rather than a cluster key beside a list of capabilities | Identity is not a capability, and a capability carrying a cluster name is nonsense; "which contexts am I in" covers the identity and the condition in one word, and the identity is just the entry with a label and no predicate |
 | A context's script prints JSON, like every other source | `active` and `label` are jq, and jq has nothing to say about prose; taking output as lines is a view's business, which is what `class: text` is for |
 | The hat asks the question and the world answers it | A hat that could declare *that* it is on production would break the one invariant the cluster display exists to keep; supplying the question is not supplying the answer |

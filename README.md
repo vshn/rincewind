@@ -185,9 +185,11 @@ example: 8 views ok
   elsewhere  inactive                dinsdale ✗ not on PATH  1 view
 ```
 
-A hat that declares no contexts falls back to `kubectl config
-current-context` for the display, exactly as before. Without a kubectl, or
-without a current context, nothing is shown there.
+A hat that declares no contexts shows nothing there, and that is the whole
+of it: rincewind names no external program of its own — not kubectl, not
+anything — so it cannot know where you are until a hat tells it how to find
+out. Whether your views talk to a cluster, an API or a local script is
+yours to decide and none of the tool's business.
 
 A reload that fails keeps the rows you had:
 the failure is said in full under them,

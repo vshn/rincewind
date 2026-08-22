@@ -16,10 +16,11 @@ import (
 // registry, and the command says so.
 const Topic = "rincewind-hats"
 
-// GitHub is named in Go here, the way kubectl is named for the cluster
-// probe. A hat cannot say where hats are found, and a search that works
-// everywhere would need a protocol nobody has. The exception is one
-// constant and one URL; everything else stays a git remote.
+// GitHub is named in Go here, which nothing outside this package does — and
+// this is the only remote system the binary reaches at all. A hat cannot say
+// where hats are found, and a search that works everywhere would need a
+// protocol nobody has. The exception is one constant and one URL; everything
+// else stays a git remote.
 const apiURL = "https://api.github.com"
 
 // searchTimeout bounds the one request. Long enough for a slow connection,

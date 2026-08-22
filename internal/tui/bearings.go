@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -18,43 +17,24 @@ import (
 // shift with the length of the view id beside it — which is what lets it be
 // found without being read.
 //
-// The answer comes from the hat's contexts: a script that prints JSON, and
-// jq over it. The hat asks the question and the world answers it, so this is
-// not the hat declaring where it is — which it may never do.
+// The answer comes from the hat's contexts and from nowhere else: a script
+// that prints JSON, and jq over it. Nothing here knows what a cluster is, or
+// that kubectl exists — this file used to run `kubectl config
+// current-context` itself, and that was the one place in the tool's own code
+// that named a producer. A hat that runs against something else entirely had
+// to live with a chrome describing a world it was not in.
 //
-// A hat that declares no contexts falls back to `kubectl config
-// current-context`, which is what the chrome read before there were any.
-// That keeps every existing hat's display; taking the Go special case away
-// altogether is a later decision, to be taken on its own.
+// So the hat asks the question and the world answers it, which is the same
+// rule the views live by. A hat that declares no contexts is a hat with
+// nothing to say about where it is, and the title bar says nothing.
 
-const (
-	// clusterTimeout bounds the fallback probe. The contexts carry their own
-	// deadline, one per script; see engine.Resolve.
-	clusterTimeout = 2 * time.Second
-	// bearingsTTL keeps a held-down tab key from spawning a process per
-	// repeat. Neither the cluster nor the platform changes between two
-	// keystrokes.
-	bearingsTTL = 2 * time.Second
-)
+// bearingsTTL keeps a held-down tab key from spawning a process per repeat.
+// Neither the cluster nor the platform changes between two keystrokes.
+const bearingsTTL = 2 * time.Second
 
 // bearingsMsg carries what a round of resolution found. An empty one is the
 // answer when nothing answered, and then nothing is shown at all.
 type bearingsMsg struct{ found engine.Bearings }
-
-// kubeContext is the fallback probe the binary runs. It is a field on the
-// model rather than a call, so the tests drive the display without spawning
-// a process — and so a build that has no business asking can leave it nil.
-//
-// The context, never reachability. `current-context` reads ~/.kube/config and
-// answers in tens of milliseconds, where asking the API server whether it is
-// up costs a round trip on every view change — and would blank the display
-// exactly when a cluster is unwell, which is when knowing which cluster it is
-// matters most. Whether it answers at all is what running a view already
-// tells you.
-func kubeContext(ctx context.Context) (string, error) {
-	out, err := exec.CommandContext(ctx, "kubectl", "config", "current-context").Output()
-	return strings.TrimSpace(string(out)), err
-}
 
 // refreshBearings asks where the scripts will run, when the view on screen
 // changes: often enough to catch a context switched in another terminal, rare
@@ -63,15 +43,14 @@ func kubeContext(ctx context.Context) (string, error) {
 //
 // One cadence for every context, and deliberately no cache key. A context is
 // expected to be cheap — the platform usually falls out of the same local
-// kubeconfig read as the cluster name, and identical sources already run once
-// per round — and a hat that writes an expensive probe can cache in its own
-// script.
+// read as the label, and identical sources already run once per round — and a
+// hat that writes an expensive probe can cache in its own script.
 //
 // The work happens in the command, never here: the menu is complete until the
 // answer lands, which is what makes failing open fall out of the ordering
 // rather than needing a rule of its own.
 func (m *model) refreshBearings() tea.Cmd {
-	if len(m.contexts) == 0 && m.lookupCluster == nil {
+	if len(m.contexts) == 0 {
 		return nil
 	}
 	if !m.bearingsAt.IsZero() && time.Since(m.bearingsAt) < bearingsTTL {
@@ -79,32 +58,9 @@ func (m *model) refreshBearings() tea.Cmd {
 	}
 	m.bearingsAt = time.Now()
 
-	if len(m.contexts) == 0 {
-		return m.probeCluster()
-	}
-
 	cs := m.contexts
 	return func() tea.Msg {
 		return bearingsMsg{found: engine.Resolve(context.Background(), cs)}
-	}
-}
-
-// probeCluster is the fallback, for a hat that declares no contexts.
-//
-// A failure is no label rather than an error: no kubectl, or no current
-// context, means this is not a cluster session — a state to show nothing in,
-// not one to complain about.
-func (m *model) probeCluster() tea.Cmd {
-	lookup := m.lookupCluster
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), clusterTimeout)
-		defer cancel()
-
-		name, err := lookup(ctx)
-		if err != nil || name == "" {
-			return bearingsMsg{}
-		}
-		return bearingsMsg{found: engine.Bearings{Labels: []string{name}}}
 	}
 }
 

@@ -244,10 +244,6 @@ type model struct {
 	// bearingsAt is when they were last asked for, so a burst of view changes
 	// costs one round rather than one each.
 	bearingsAt time.Time
-	// lookupCluster is the fallback probe, for a hat that declares no
-	// contexts. Run sets it; newModel leaves it nil, so the tests never spawn
-	// a process and never depend on a kubeconfig.
-	lookupCluster func(context.Context) (string, error)
 
 	// clipboard is the local clipboard writer, or nil for OSC 52 alone. Run
 	// sets it; newModel leaves it nil, so running the tests cannot overwrite
@@ -320,7 +316,6 @@ func Run(ctx context.Context, views []engine.View, contexts []engine.Context, ve
 	m := newModel(views)
 	m.version = version
 	m.contexts = contexts
-	m.lookupCluster = kubeContext
 	m.clipboard = localClipboard()
 
 	prog := tea.NewProgram(m, tea.WithContext(ctx))
