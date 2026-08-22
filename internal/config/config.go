@@ -173,9 +173,10 @@ func Load(path string) (Hat, error) {
 
 	// One view may open another declared in a different file, and may name a
 	// context declared in a third, so linking waits until every file has been
-	// read.
+	// read. Its errors are the hat's, not one file's, so it is the hat that is
+	// named — the same way an empty directory is.
 	if err := link(hat); err != nil {
-		return Hat{}, err
+		return Hat{}, fmt.Errorf("%s: %w", path, err)
 	}
 	return hat, nil
 }
@@ -218,9 +219,6 @@ func compile(r io.Reader) (Hat, error) {
 	if err := dec.Decode(&doc); err != nil {
 		return Hat{}, err
 	}
-	if len(doc.Views) == 0 {
-		return Hat{}, fmt.Errorf("no views defined")
-	}
 
 	var hat Hat
 	seen := map[string]bool{}
@@ -259,6 +257,14 @@ func compile(r io.Reader) (Hat, error) {
 // exists, and catches an id used twice — which, with several files, is a
 // mistake made across them as easily as within one.
 func link(hat Hat) error {
+	// A hat with no views is nothing to pull anything out of. The rule is
+	// the hat's and not the file's, though: one file per group is how these
+	// are kept, and a contexts.yaml holding nothing but contexts is a group
+	// like any other.
+	if len(hat.Views) == 0 {
+		return fmt.Errorf("no views defined")
+	}
+
 	seen := map[string]bool{}
 	for _, v := range hat.Views {
 		if seen[v.ID] {
@@ -416,10 +422,17 @@ func toDef(v view) (engine.Def, error) {
 		return fail("follow and refresh exclude each other: a stream is already current")
 	}
 
+	needed := map[string]bool{}
 	for _, id := range v.Needs {
 		if strings.TrimSpace(id) == "" {
 			return fail("needs: a context has no id")
 		}
+		// Downstream counts and marks take the list at its word, so a repeat
+		// would be shown and tallied twice.
+		if needed[id] {
+			return fail("needs %q twice", id)
+		}
+		needed[id] = true
 	}
 
 	d := engine.Def{

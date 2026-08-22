@@ -139,6 +139,40 @@ func TestTheCursorNeverLandsOnAHiddenView(t *testing.T) {
 	}
 }
 
+// A round can rule out every listed view, and then there is nothing under
+// the cursor. Enter must be a no-op: it used to replace the first tab with
+// an empty one, throwing away the result on screen.
+func TestEnterOnAnEmptiedMenuKeepsTheTab(t *testing.T) {
+	var views []engine.View
+	for _, v := range gatedViews() {
+		if len(v.Needs) > 0 {
+			views = append(views, v)
+		}
+	}
+	m := newModel(views)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = next.(*model)
+
+	press(t, m, "enter") // run the view under the cursor
+	if m.cur().res == nil {
+		t.Fatal("the opened view produced nothing")
+	}
+
+	m.Update(bearingsMsg{found: engine.Bearings{State: map[string]engine.State{
+		"elsewhere": engine.StateInactive,
+		"cloudy":    engine.StateInactive,
+	}}})
+	if m.selected() != nil {
+		t.Fatal("something is still listed; this test needs an empty menu")
+	}
+
+	press(t, m, "enter")
+	if m.cur().view == nil || m.cur().res == nil {
+		t.Errorf("enter on an empty menu replaced the tab: view %v, res %v",
+			m.cur().view, m.cur().res)
+	}
+}
+
 // A round that hides the view under the cursor moves it; one that hides
 // others leaves it exactly where it was.
 func TestResolutionKeepsTheCursorOnItsView(t *testing.T) {

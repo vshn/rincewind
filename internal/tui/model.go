@@ -244,6 +244,9 @@ type model struct {
 	// bearingsAt is when they were last asked for, so a burst of view changes
 	// costs one round rather than one each.
 	bearingsAt time.Time
+	// bearingsSeq numbers the rounds, so one that outlived the TTL cannot
+	// land after a newer one and put a stale answer on screen.
+	bearingsSeq int
 
 	// clipboard is the local clipboard writer, or nil for OSC 52 alone. Run
 	// sets it; newModel leaves it nil, so running the tests cannot overwrite
@@ -558,6 +561,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onKey(msg)
 
 	case bearingsMsg:
+		// Only the latest round may answer; an older one that took longer
+		// carries a world that has since been asked again.
+		if msg.seq != m.bearingsSeq {
+			return m, nil
+		}
 		m.bearings = msg.found
 		// What the contexts found is what decides the menu, so the list is
 		// laid out again here rather than consulted while painting.
@@ -772,6 +780,13 @@ func (t *tab) prune() {
 // open runs the view under the sidebar cursor from scratch. Picking from the
 // menu is starting over, not drilling: every tab opened by an action goes.
 func (m *model) open() tea.Cmd {
+	// A resolution round can empty the menu — every listed view ruled out —
+	// and then there is nothing under the cursor to open. The keystroke must
+	// be a no-op: replacing the first tab would throw away a result for
+	// nothing.
+	if m.selected() == nil {
+		return nil
+	}
 	m.closeFrom(1)
 	// The first tab is replaced rather than dropped, so its run has to be
 	// cancelled by hand — a followed one would otherwise keep a script alive
