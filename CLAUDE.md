@@ -161,6 +161,12 @@ Both kinds of action open a tab; `esc` closes it.
   Never hardcode `/bin/bash`; per-view `source.shell` is the override.
 - **Parameters become environment variables**,
   never text templated into the script.
+- **Parameters are printed; the inherited environment is not.**
+  Every value reaching a step is shown before it runs,
+  so a secret must never be a parameter or an action `env:` value —
+  it would land in the job tab, in `Y`, and in `act`'s CI log.
+  A script inherits the real environment whole,
+  and only its *text* is displayed, so `$TOKEN` on screen is a value nowhere.
 - **A hat is code.** `hats install` asks before cloning and `hats update`
   shows `git diff --stat` before applying;
   the topic search is discovery, never a registry.

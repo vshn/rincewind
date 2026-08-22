@@ -60,6 +60,27 @@ never templated into its text —
 splicing user input into code is an injection hole;
 an environment variable is not.
 
+A script also inherits **the environment it was started from**, whole.
+Nothing has to declare that, and nothing in a hat can turn it off:
+`$HOME`, `$PATH` and whatever else the person exported are simply there.
+That is what the lowercase rule on parameter names is protecting —
+a parameter called `PATH` would shadow the real one.
+
+Which settles where a secret goes, and it is not a parameter.
+**Parameters are printed and the environment is not.**
+Every value that reaches a step is shown before it runs —
+that is the whole point of showing the command —
+so a token passed as `-p token=…` appears in the job tab,
+in what `Y` copies, and on `act`'s stderr, which in a CI job is the log.
+A token read from the ambient environment appears nowhere:
+what is displayed is the script's *text*, so the screen shows `$TOKEN`
+while only the process sees its value.
+
+So the rule is: a parameter holds what you would say out loud,
+and everything else travels in the environment the script inherits.
+The same applies to an action's `env:` values, for the same reason —
+they are what the confirmation is about, so they are on screen.
+
 ## Expressions are jq
 
 `rows`, `key` and every column `expr` are jq programs,
@@ -947,6 +968,7 @@ example/           a hat that invents its data, and the config fixture
 | stdout is a JSON stream | Multi-source views without forcing the script to merge |
 | jq (gojq) as the only expression language | Users already know it; expressions are developed with real jq and pasted in |
 | Parameters as env vars, never templated | Splicing user input into script text is an injection hole |
+| A secret belongs in the inherited environment, never in a parameter | Showing the command before it runs means every parameter is displayed — in the job tab, in what `Y` copies, and on `act`'s stderr, which in CI is the log; a script inherits the real environment for free, and only its text is shown, so `$TOKEN` reads as `$TOKEN` |
 | Drill-down is an action, not its own feature | The old tool proved one mechanism carries both; a `drilldown:` schema would be un-built the first time someone wants to cordon a node |
 | Mutations require an explicit selection | Reverses the old "the filter is the selector"; `a` still selects everything the filter left, so nothing is lost but the accident |
 | Navigation follows the cursor row | Removes the old "select one pool first" refusal entirely |

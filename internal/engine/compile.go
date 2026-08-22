@@ -196,16 +196,23 @@ func newView(d Def, run func(context.Context, Args) (Result, error)) (View, erro
 const argsVar = "$args"
 
 func compileExpr(view, field, src string) (*gojq.Code, error) {
+	return compileExprIn("view", view, field, src)
+}
+
+// compileExprIn is that for whatever declared the expression. A context is
+// not a view and must not be named as one, but every other word of the
+// message — and every rule about when it is written — is the same.
+func compileExprIn(kind, name, field, src string) (*gojq.Code, error) {
 	if src == "" {
-		return nil, fmt.Errorf("view %q: %s: expression is required", view, field)
+		return nil, fmt.Errorf("%s %q: %s: expression is required", kind, name, field)
 	}
 	q, err := gojq.Parse(src)
 	if err != nil {
-		return nil, fmt.Errorf("view %q: %s: %v", view, field, err)
+		return nil, fmt.Errorf("%s %q: %s: %v", kind, name, field, err)
 	}
 	code, err := gojq.Compile(q, gojq.WithVariables([]string{argsVar}))
 	if err != nil {
-		return nil, fmt.Errorf("view %q: %s: %v", view, field, err)
+		return nil, fmt.Errorf("%s %q: %s: %v", kind, name, field, err)
 	}
 	return code, nil
 }
