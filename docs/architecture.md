@@ -231,54 +231,10 @@ so it is simply not listed, and an action reaches it.
 
 ## Config schema
 
-```yaml
-contexts:                    # optional; see "Where one is"
-  - id: cloudscale           # unique across the whole hat, [a-z][a-z0-9_-]*
-    short: Cloudscale-managed clusters
-    source:
-      script: kubectl config view --minify -o json
-    active: '."current-context" | test("-cloudscale-")'   # optional predicate
-    label: '"cloudscale"'    # optional; what it adds to the chrome
-    tools: [cloudscale-cli]  # reported by check, and gates nothing
-
-views:
-  - id: argo.apps            # unique, required; the part before the first
-                             # dot groups the sidebar, the rest is the menu
-                             # label — an id without a dot is ungrouped
-    title: Argo applications # description, shown in the title bar; default: id
-    class: table             # optional; table (default), text or chart
-    needs: cloudscale        # optional; a context id or a list of them
-    refresh: 30s             # optional auto-reload; manual r always works
-    follow: false            # optional; text only, and excludes refresh
-    source:
-      shell: [sh, -c]        # optional; this is the default
-      script: |              # required
-        kubectl get applications -A -o json
-    rows: .items[]           # jq: one stdout value → row objects; required
-    key: .metadata.name      # jq: row identity; optional but recommended
-    columns:                 # required, at least one
-      - name: SYNC
-        expr: .status.sync.status
-        emphasis: { Synced: good, OutOfSync: bad, Unknown: warn }
-        format: ""           # "" | timestamp | age
-    sort:                    # optional, multi-key, stable
-      - by: SYNC
-        rank: [OutOfSync, Unknown, Synced]   # rank xor order
-      - by: NAME             # order: asc (default) | desc
-```
-
-Semantics that are easy to get wrong:
-
-- **Sorting compares the raw jq values**, before formatting:
-  numbers sort numerically, RFC 3339 timestamps chronologically.
-  `rank` lists values from worst to best; anything unlisted sorts last.
-- **Emphasis matches the raw value**, before formatting, per column —
-  the same value may mean different things in different columns.
-- **`key` names a row across reloads.**
-  The selection is keyed by it;
-  without a key expression the rendered cells stand in,
-  and a reload that changes the display can lose the selection.
-- **Formats pass unparseable values through** instead of hiding them.
+The complete field-by-field reference lives in [hat.md](hat.md),
+so the schema is documented in exactly one place;
+this document keeps the reasons.
+[example/](../example/) exercises every part of it.
 
 ## Text views
 
@@ -720,38 +676,47 @@ gets a chrome describing the world it is actually in,
 where the kubectl probe could only ever describe one world
 and would sit there empty in every other.
 
-So the rule is now flat: **outside `internal/hats`, no external program is
-named in Go.** The engine runs `source.shell` with `source.script` and
-decodes JSON. `check` probes what `tools:` lists, and the names come from
-the hat. The clipboard writers are the one remaining exception, and they are
-about the machine the person is sitting at, never about what a hat is
-pointed at.
+So the rule is now flat:
+**outside `internal/hats`, no external program is named in Go.**
+The engine runs `source.shell` with `source.script` and decodes JSON.
+`check` probes what `tools:` lists, and the names come from the hat.
+The clipboard writers are the one remaining exception,
+and they are about the machine the person is sitting at,
+never about what a hat is pointed at.
 
 What follows from it:
 
-- **A hat that declares no contexts shows nothing top right**, and takes no
-  room for it. That is the correct answer rather than a gap: the tool has not
-  been told how to find out, and guessing is what this whole construct exists
-  to stop.
-- **`internal/hats` is the only package that reaches a remote system** — the
-  GitHub topic search, one constant and one URL — and the only one that names
-  git and ssh. Managing hats is the one job that cannot be a hat's own script.
+- **A hat that declares no contexts shows nothing top right**,
+  and takes no room for it.
+  That is the correct answer rather than a gap:
+  the tool has not been told how to find out,
+  and guessing is what this whole construct exists to stop.
+- **`internal/hats` is the only package that reaches a remote system** —
+  the GitHub topic search, one constant and one URL —
+  and the only one that names git and ssh.
+  Managing hats is the one job that cannot be a hat's own script.
 - **The identity should be a local read**, and is now the hat's business.
-  It is the label one checks before a mutation, so it has to go on answering
-  when the cluster does not — a display that blanks exactly when a cluster is
-  unwell fails at the one moment it exists for.
-  Reading the kubeconfig answers in milliseconds and never depends on the
-  thing being described; whether the API server answers at all is what running
-  a view already tells you.
-- **A second context may pay a round trip**, when losing it degrades
-  gracefully and there is no local answer that is not a guess.
-  The reference hat asks the API for one node's `spec.providerID` to name the
-  platform, because deriving it from the cluster's name would be reading a
-  convention rather than a fact.
-  It is affordable — `?limit=1` keeps it one small object however large the
-  cluster — and it fails well: an unreachable API leaves that context unknown,
-  which hides nothing and costs one word, while the cluster's own name is read
-  locally and stays on screen.
+  It is the label one checks before a mutation,
+  so it has to go on answering when the cluster does not —
+  a display that blanks exactly when a cluster is unwell
+  fails at the one moment it exists for.
+  Reading the kubeconfig answers in milliseconds
+  and never depends on the thing being described;
+  whether the API server answers at all
+  is what running a view already tells you.
+- **A second context may pay a round trip**,
+  when losing it degrades gracefully
+  and there is no local answer that is not a guess.
+  The reference hat asks the API for one node's `spec.providerID`
+  to name the platform,
+  because deriving it from the cluster's name
+  would be reading a convention rather than a fact.
+  It is affordable —
+  `?limit=1` keeps it one small object however large the cluster —
+  and it fails well:
+  an unreachable API leaves that context unknown,
+  which hides nothing and costs one word,
+  while the cluster's own name is read locally and stays on screen.
 
 ## Getting a hat
 
@@ -775,11 +740,13 @@ holds one level up as well:
 
 - `install` names the repository and where it will go,
   says in one line that a hat is code that will run as you,
-  and asks. `--yes` is the way past it, for scripts.
+  and asks.
+  `--yes` is the way past it, for scripts.
 - `update` **fetches, shows `git diff --stat`, and asks** before moving anything.
   A silent update of code that runs against a production cluster
   is the worst version of this feature.
-- Nothing updates itself. No background fetch, no check on start.
+- Nothing updates itself.
+  No background fetch, no check on start.
 - `install` runs `config.Load` on every hat it found,
   so a hat that does not load fails while you are installing it
   rather than the first time you press a key.

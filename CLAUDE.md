@@ -33,7 +33,9 @@ Not built yet: batched (`once:`) actions; a filter for `view`;
 ## Docs
 
 Read [docs/architecture.md](docs/architecture.md) before structural changes:
-pipeline, stdout contract, config schema, error philosophy, decisions table.
+pipeline, stdout contract, error philosophy, decisions table.
+[docs/hat.md](docs/hat.md) is the complete schema reference for hat authors;
+a schema change updates it in the same commit.
 
 ## Vocabulary
 
@@ -50,8 +52,9 @@ drawn as a braille time-series plot with a legend.
 No rows, so no selection: `/` picks series by name,
 actions need `scope: none`, and `yrange:` fixes the value axis.
 
-A **context** is what one is in the middle of: a platform, a cluster,
-an environment. One script printing JSON,
+A **context** is what one is in the middle of:
+a platform, a cluster, an environment.
+One script printing JSON,
 an optional `active:` predicate over the first value it printed,
 and an optional `label:` from the same value.
 No predicate means active whenever the script produced a value —
@@ -208,8 +211,9 @@ Both kinds of action open a tab; `esc` closes it.
   the hat" true now that the hat is the one asking.
 - **No producer is named in Go.** Not kubectl, not anything:
   a hat may run against a cluster, an API or nothing at all,
-  and the tool cannot tell. A hat that declares no contexts
-  shows nothing top right, and that is the correct answer.
+  and the tool cannot tell.
+  A hat that declares no contexts shows nothing top right,
+  and that is the correct answer.
   Re-asked when the view on screen changes, behind a TTL —
   one round for every context, no per-context cadence, and no cache key:
   identical sources already run once per round,
