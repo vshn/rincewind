@@ -34,7 +34,7 @@ var (
 	borderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	focusBorder  = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
 	tabStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
-	clusterStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("5"))
+	bearingStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("5"))
 	keyStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 	promptStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11"))
 )
@@ -94,25 +94,30 @@ func (m *model) View() tea.View {
 	return v
 }
 
+// chromeSep separates the parts of the title bar, on both sides of it: the
+// tool, the view and its title on the left, the contexts' labels on the
+// right.
+const chromeSep = "  ·  "
+
 // titleLine reads tool · id args · title. It describes the tab on screen,
 // not the entry the sidebar cursor happens to rest on. The title is the
 // first thing dropped when space runs short: the id is what you navigate by,
 // and the arguments are what tell two tabs of the same view apart.
 func (m *model) titleLine() string {
-	sep := sepStyle.Render("  ·  ")
+	sep := sepStyle.Render(chromeSep)
 
 	name := titleStyle.Render("rincewind")
 	if j := m.cur().job; j != nil {
 		if j.asking() {
-			return m.withCluster(name + sep + titleStyle.Render(j.action.Name) + sep +
+			return m.withBearings(name + sep + titleStyle.Render(j.action.Name) + sep +
 				descStyle.Render(j.action.Short))
 		}
-		return m.withCluster(name + sep + titleStyle.Render(j.action.Name) + sep +
+		return m.withBearings(name + sep + titleStyle.Render(j.action.Name) + sep +
 			descStyle.Render(engine.Plural(len(j.steps), "step")))
 	}
 	cur := m.cur().view
 	if cur == nil {
-		return m.withCluster(name)
+		return m.withBearings(name)
 	}
 
 	id := cur.ID
@@ -127,15 +132,15 @@ func (m *model) titleLine() string {
 		return line
 	}
 
-	// The title yields to the cluster, not the other way round: what the
-	// view is called matters less than which cluster it is showing.
+	// The title yields to the labels, not the other way round: what the view
+	// is called matters less than where it is showing it from.
 	if cur.Title != cur.ID {
-		room := m.width - boxPad - lipgloss.Width(line) - m.clusterRoom()
+		room := m.width - boxPad - lipgloss.Width(line) - m.bearingsRoom()
 		if room > lipgloss.Width(sep)+lipgloss.Width(cur.Title) {
 			line += sep + descStyle.Render(cur.Title)
 		}
 	}
-	return m.withCluster(line)
+	return m.withBearings(line)
 }
 
 // argLabel names the parameters the tab was opened with, so a drilled-into

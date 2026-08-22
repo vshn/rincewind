@@ -6,14 +6,14 @@ import tea "charm.land/bubbletea/v2"
 // key is the whole binding table; boundKeys beside it is what a test holds
 // against the reserved set in internal/config.
 
-// onKey handles a key and re-probes the cluster when the view on screen has
+// onKey handles a key and asks again where one is when the view on screen has
 // changed. Hooking it here rather than in open, drill, activate and closeTab
 // keeps the four from drifting apart, and covers whatever is added next.
 func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	before := m.cur().view
 	next, cmd := m.key(msg)
 	if m.cur().view != before {
-		if probe := m.refreshCluster(); probe != nil {
+		if probe := m.refreshBearings(); probe != nil {
 			return next, tea.Batch(cmd, probe)
 		}
 	}

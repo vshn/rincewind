@@ -217,15 +217,20 @@ type model struct {
 	// version is shown in the footer; the binary stamps it at build time.
 	version string
 
-	// cluster is the kubectl context the scripts will run against, shown top
-	// right wherever acting on the wrong one would be expensive. Empty when
-	// there is no answer, and then nothing is shown at all.
-	cluster string
-	// clusterAt is when it was last asked, so a burst of view changes costs
-	// one probe rather than one each.
-	clusterAt time.Time
-	// lookupCluster is the probe. Run sets it; newModel leaves it nil, so
-	// the tests never spawn a process and never depend on a kubeconfig.
+	// contexts are the hat's: what it asks the world in order to say where
+	// one is, and which of its views apply here. Run sets them; newModel
+	// leaves them empty, so a test resolves nothing it did not ask for.
+	contexts []engine.Context
+	// bearings is the last round's answer — the labels the chrome reads top
+	// right, and what became of every context. Empty when nothing answered,
+	// and then nothing is shown at all.
+	bearings engine.Bearings
+	// bearingsAt is when they were last asked for, so a burst of view changes
+	// costs one round rather than one each.
+	bearingsAt time.Time
+	// lookupCluster is the fallback probe, for a hat that declares no
+	// contexts. Run sets it; newModel leaves it nil, so the tests never spawn
+	// a process and never depend on a kubeconfig.
 	lookupCluster func(context.Context) (string, error)
 
 	// clipboard is the local clipboard writer, or nil for OSC 52 alone. Run
@@ -295,9 +300,10 @@ func (m *model) cur() *tab { return m.tabs[m.active] }
 // cancelled — which is what a signal does. Handing the context to bubbletea
 // is what makes a SIGTERM come back through prog.Run, so the scripts still
 // running are stopped rather than orphaned by a process that just ends.
-func Run(ctx context.Context, views []engine.View, version string) error {
+func Run(ctx context.Context, views []engine.View, contexts []engine.Context, version string) error {
 	m := newModel(views)
 	m.version = version
+	m.contexts = contexts
 	m.lookupCluster = kubeContext
 	m.clipboard = localClipboard()
 
@@ -448,9 +454,9 @@ func (m *model) total() int {
 	}
 }
 
-// Init asks which cluster this is before anything else: the answer belongs
-// on screen from the first paint, not from the first view run.
-func (m *model) Init() tea.Cmd { return m.refreshCluster() }
+// Init asks where this is before anything else: the answer belongs on screen
+// from the first paint, not from the first view run.
+func (m *model) Init() tea.Cmd { return m.refreshBearings() }
 
 // stop cancels the run in flight, if any.
 // stopAll cancels every run in flight, on quit.
@@ -503,8 +509,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.onKey(msg)
 
-	case clusterMsg:
-		m.cluster = msg.name
+	case bearingsMsg:
+		m.bearings = msg.found
 		return m, nil
 
 	case copiedMsg:

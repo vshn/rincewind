@@ -48,7 +48,7 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return tui.Run(cmd.Context(), loaded.Views, version)
+		return tui.Run(cmd.Context(), loaded.Views, loaded.Contexts, version)
 	},
 }
 
