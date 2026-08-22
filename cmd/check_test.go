@@ -126,3 +126,56 @@ views:
 		t.Errorf("the probe's own complaint is missing:\n%s", out)
 	}
 }
+
+// aheadHat is a hat that uses a key this build has never heard of, the way a
+// hat written for a newer rincewind would.
+const aheadHat = `
+kontexte: []
+views:
+  - id: demo.list
+    zukunft: ja
+    source: { script: "echo '{\"n\":1}'" }
+    rows: .
+    columns: [{name: N, expr: .n}]
+`
+
+// A hat from the future loads, and says what it could not make sense of.
+func TestCheckReportsUnknownKeysWithoutFailing(t *testing.T) {
+	dir := t.TempDir()
+	writeHat(t, dir, "ahead.yaml", aheadHat)
+
+	out, err := runCmd(t, "", "check", "--hat", dir)
+	if err != nil {
+		t.Fatalf("an unknown key failed check: %v", err)
+	}
+	for _, want := range []string{
+		`unknown key "kontexte" in a hat`,
+		`unknown key "zukunft" in a view`,
+		"ignored 2 unknown keys",
+		"a hat written for a newer rincewind",
+		"1 view ok",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the report does not mention %q:\n%s", want, out)
+		}
+	}
+}
+
+// Strict is for the hat's own pipeline, where an unknown key is a typo:
+// the author is by definition running the version they wrote it for.
+func TestCheckStrictFailsOnAnUnknownKey(t *testing.T) {
+	dir := t.TempDir()
+	writeHat(t, dir, "ahead.yaml", aheadHat)
+
+	if _, err := runCmd(t, "", "check", "--hat", dir, "--strict"); err == nil {
+		t.Fatal("--strict passed a hat with unknown keys")
+	} else if !strings.Contains(err.Error(), "2 unknown keys") {
+		t.Errorf("the error %q does not count them", err)
+	}
+}
+
+func TestCheckStrictPassesACleanHat(t *testing.T) {
+	if _, err := runCmd(t, "", "check", "--hat", demoHat, "--strict"); err != nil {
+		t.Errorf("--strict failed the example hat: %v", err)
+	}
+}

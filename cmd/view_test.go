@@ -3,6 +3,8 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -175,5 +177,38 @@ func TestViewReportsAFailingScript(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no such pod") {
 		t.Errorf("the error is %v, want it to carry what stderr said", err)
+	}
+}
+
+// The keys this build did not understand are diagnostics, so they go where
+// the notes go: a redirect catches the table, not the report.
+func TestUnknownKeysGoToStderr(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ahead.yaml"), []byte(aheadHat), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var o, e bytes.Buffer
+	hatFlag, viewParams = "", nil
+	rootCmd.SetOut(&o)
+	rootCmd.SetErr(&e)
+	rootCmd.SetArgs([]string{"view", "demo.list", "--hat", dir})
+	t.Cleanup(func() {
+		rootCmd.SetOut(nil)
+		rootCmd.SetErr(nil)
+		rootCmd.SetArgs(nil)
+	})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(e.String(), `unknown key "zukunft"`) {
+		t.Errorf("stderr does not report the unknown key:\n%s", e.String())
+	}
+	if strings.Contains(o.String(), "unknown key") {
+		t.Errorf("the report landed on stdout:\n%s", o.String())
+	}
+	if !strings.Contains(o.String(), "N") {
+		t.Errorf("the view did not run:\n%s", o.String())
 	}
 }

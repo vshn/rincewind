@@ -32,16 +32,36 @@ var checkCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		loaded, err := config.Load(path)
+		// The report is what this command is for, so the unknown keys go to
+		// stdout with the rest of it rather than off to the side.
+		out := cmd.OutOrStdout()
+		loaded, err := loadHat(out, path)
 		if err != nil {
 			return err
 		}
+		if len(loaded.Warnings) > 0 {
+			say(out, "\n")
+		}
 
-		out := cmd.OutOrStdout()
 		say(out, "%s: %s ok\n", path, engine.Plural(len(loaded.Views), "view"))
 		reportContexts(cmd.Context(), out, loaded)
+
+		// Strict is for the hat's own pipeline: an unknown key there is a
+		// typo, because the author is by definition running the version they
+		// wrote it for.
+		if checkStrict {
+			return unknownNote(loaded.Warnings)
+		}
 		return nil
 	},
+}
+
+// checkStrict makes an unknown key an error rather than a note.
+var checkStrict bool
+
+func init() {
+	checkCmd.Flags().BoolVar(&checkStrict, "strict", false,
+		"treat a key this build does not understand as an error")
 }
 
 // reportContexts resolves the hat's contexts and lays them out one to a line:

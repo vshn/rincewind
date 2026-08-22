@@ -50,7 +50,7 @@ var actCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		loaded, err := config.Load(path)
+		loaded, err := loadHat(cmd.ErrOrStderr(), path)
 		if err != nil {
 			return err
 		}

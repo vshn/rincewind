@@ -5,6 +5,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -127,6 +128,9 @@ func (n *names) UnmarshalYAML(node *yaml.Node) error {
 type Hat struct {
 	Views    []engine.View
 	Contexts []engine.Context
+	// Warnings are the keys this build did not recognise. They are reported
+	// rather than refused; see decode.
+	Warnings []string
 }
 
 // Load reads and compiles a config file, or every *.yaml in a directory.
@@ -169,6 +173,7 @@ func Load(path string) (Hat, error) {
 		}
 		hat.Views = append(hat.Views, read.Views...)
 		hat.Contexts = append(hat.Contexts, read.Contexts...)
+		hat.Warnings = append(hat.Warnings, read.Warnings...)
 	}
 
 	// One view may open another declared in a different file, and may name a
@@ -191,6 +196,11 @@ func loadFile(path string) (Hat, error) {
 	hat, err := compile(f)
 	if err != nil {
 		return Hat{}, fmt.Errorf("%s: %w", path, err)
+	}
+	// Named the way the errors are: a warning about line 14 is no use
+	// without the file it is line 14 of.
+	for i, w := range hat.Warnings {
+		hat.Warnings[i] = path + ": " + w
 	}
 	return hat, nil
 }
@@ -216,11 +226,12 @@ func compile(r io.Reader) (Hat, error) {
 	dec.KnownFields(true)
 
 	var doc file
-	if err := dec.Decode(&doc); err != nil {
+	warnings, err := decode(dec, &doc)
+	if err != nil {
 		return Hat{}, err
 	}
 
-	var hat Hat
+	hat := Hat{Warnings: warnings}
 	seen := map[string]bool{}
 	for _, c := range doc.Contexts {
 		def, err := toContextDef(c)
@@ -251,6 +262,82 @@ func compile(r io.Reader) (Hat, error) {
 		hat.Views = append(hat.Views, compiled)
 	}
 	return hat, nil
+}
+
+// decode reads the document strictly and then splits what strictness caught
+// in two.
+//
+// A key the schema does not know is not a mistake this build can recognise as
+// one. It is either a typo or a hat written for a newer rincewind, and
+// nothing in the file distinguishes them — so refusing both alike means one
+// person adding a field to a shared hat takes the whole tool away from
+// everyone who has not upgraded yet. A hat travels separately from the
+// binary; that is the arrangement, and a schema that cannot grow without
+// breaking it is not one.
+//
+// So an unknown key is reported and ignored, and every other type error still
+// kills the load. Nothing else about "config mistakes die at load time"
+// changes: everything the schema *does* know is still held to it here.
+//
+// The document is fully decoded either way — the decoder collects its type
+// errors and carries on — so there is no second pass.
+func decode(dec *yaml.Decoder, doc *file) ([]string, error) {
+	err := dec.Decode(doc)
+	if err == nil {
+		return nil, nil
+	}
+	var te *yaml.TypeError
+	if !errors.As(err, &te) {
+		return nil, err
+	}
+
+	var warnings []string
+	var fatal []string
+	for _, e := range te.Errors {
+		if unknown, ok := unknownKey(e); ok {
+			warnings = append(warnings, unknown)
+			continue
+		}
+		fatal = append(fatal, e)
+	}
+	if len(fatal) > 0 {
+		return nil, &yaml.TypeError{Errors: fatal}
+	}
+	return warnings, nil
+}
+
+// unknownField is what the decoder says about a key the schema does not
+// declare. Reading its own message back is the price of letting the library
+// do the matching: the alternative is a second list of every key in the
+// schema, kept beside the structs, which would go stale the first time
+// someone added one.
+var unknownField = regexp.MustCompile(`^line (\d+): field (\S+) not found in type (\S+)$`)
+
+// unknownKey reshapes that message into one a hat's author can act on. The Go
+// type name is no use to them; the line and the word are.
+func unknownKey(msg string) (string, bool) {
+	m := unknownField.FindStringSubmatch(msg)
+	if m == nil {
+		return "", false
+	}
+	where, named := schemaNames[m[3]]
+	if !named {
+		where = strings.TrimPrefix(m[3], "config.")
+	}
+	return fmt.Sprintf("line %s: unknown key %q in %s", m[1], m[2], where), true
+}
+
+// schemaNames says what each of the schema's types is called in the language
+// a hat is written in.
+var schemaNames = map[string]string{
+	"config.file":     "a hat",
+	"config.view":     "a view",
+	"config.ctxEntry": "a context",
+	"config.source":   "a source",
+	"config.param":    "a parameter",
+	"config.action":   "an action",
+	"config.column":   "a column",
+	"config.sortBy":   "a sort key",
 }
 
 // link resolves navigating actions, holds every `needs:` to a context that
