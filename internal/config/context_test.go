@@ -136,6 +136,13 @@ func TestBrokenContextsFailWithContext(t *testing.T) {
 			yaml: strings.Replace(withContexts, "needs: kubernetes", `needs: ""`, 1),
 			want: []string{`view "demo.list"`, "needs"},
 		},
+		// A repeat would be tallied and shown twice: check counts the gated
+		// views over the list, and the sidebar's waiting mark prints it.
+		{
+			name: "needs the same context twice",
+			yaml: strings.Replace(withContexts, "needs: kubernetes", "needs: [kubernetes, kubernetes]", 1),
+			want: []string{`view "demo.list"`, `needs "kubernetes" twice`},
+		},
 		{
 			name: "needs is neither a name nor a list",
 			yaml: strings.Replace(withContexts, "needs: kubernetes", "needs: {a: b}", 1),
@@ -234,6 +241,57 @@ views:
 	for _, w := range []string{`context "kubernetes"`, "a.yaml", "b.yaml"} {
 		if !strings.Contains(err.Error(), w) {
 			t.Errorf("error %q does not mention %q", err, w)
+		}
+	}
+}
+
+// One file per group is how a hat is kept, and contexts are a group like any
+// other: a file holding nothing but them is not an empty file.
+func TestAFileMayHoldOnlyContexts(t *testing.T) {
+	loaded, err := hatDir(t, map[string]string{
+		"contexts.yaml": `
+contexts:
+  - id: kubernetes
+    source: { script: "echo '{\"n\":\"demo\"}'" }
+    label: .n
+`,
+		"views.yaml": `
+views:
+  - id: a.one
+    needs: kubernetes
+    source: { script: "echo '{}'" }
+    rows: .
+    columns: [{name: X, expr: "1"}]
+`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Contexts) != 1 || len(loaded.Views) != 1 {
+		t.Fatalf("got %d contexts and %d views, want one of each", len(loaded.Contexts), len(loaded.Views))
+	}
+}
+
+// A hat with no views anywhere is still nothing to pull anything out of —
+// and the error names the hat, because no single file is the one at fault.
+func TestAHatOfNothingButContextsIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	body := `
+contexts:
+  - id: kubernetes
+    source: { script: "echo '{\"n\":\"demo\"}'" }
+    label: .n
+`
+	if err := os.WriteFile(filepath.Join(dir, "contexts.yaml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("a hat with no views loaded")
+	}
+	for _, w := range []string{"no views", dir} {
+		if !strings.Contains(err.Error(), w) {
+			t.Errorf("the error %q does not mention %q", err, w)
 		}
 	}
 }

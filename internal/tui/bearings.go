@@ -33,8 +33,15 @@ import (
 const bearingsTTL = 2 * time.Second
 
 // bearingsMsg carries what a round of resolution found. An empty one is the
-// answer when nothing answered, and then nothing is shown at all.
-type bearingsMsg struct{ found engine.Bearings }
+// answer when nothing answered, and then nothing is shown at all. The seq
+// names the round: probes run one after another, each with its own timeout,
+// so a slow round can outlive the TTL and land after a newer one — and a
+// stale answer must not overwrite a fresh one on the one display that exists
+// to prevent acting on the wrong cluster.
+type bearingsMsg struct {
+	found engine.Bearings
+	seq   int
+}
 
 // refreshBearings asks where the scripts will run, when the view on screen
 // changes: often enough to catch a context switched in another terminal, rare
@@ -57,10 +64,11 @@ func (m *model) refreshBearings() tea.Cmd {
 		return nil
 	}
 	m.bearingsAt = time.Now()
+	m.bearingsSeq++
 
-	cs := m.contexts
+	cs, seq := m.contexts, m.bearingsSeq
 	return func() tea.Msg {
-		return bearingsMsg{found: engine.Resolve(context.Background(), cs)}
+		return bearingsMsg{found: engine.Resolve(context.Background(), cs), seq: seq}
 	}
 }
 

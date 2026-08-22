@@ -736,12 +736,22 @@ What follows from it:
 - **`internal/hats` is the only package that reaches a remote system** — the
   GitHub topic search, one constant and one URL — and the only one that names
   git and ssh. Managing hats is the one job that cannot be a hat's own script.
-- **The context, never reachability**, still holds and is now the hat's
-  business: a probe should read something local and answer in tens of
-  milliseconds. Asking an API server whether it is up costs a round trip on
-  every view change, and would blank the display exactly when a cluster is
-  unwell — which is when knowing which cluster it is matters most. Whether it
-  answers at all is what running a view already tells you.
+- **The identity should be a local read**, and is now the hat's business.
+  It is the label one checks before a mutation, so it has to go on answering
+  when the cluster does not — a display that blanks exactly when a cluster is
+  unwell fails at the one moment it exists for.
+  Reading the kubeconfig answers in milliseconds and never depends on the
+  thing being described; whether the API server answers at all is what running
+  a view already tells you.
+- **A second context may pay a round trip**, when losing it degrades
+  gracefully and there is no local answer that is not a guess.
+  The reference hat asks the API for one node's `spec.providerID` to name the
+  platform, because deriving it from the cluster's name would be reading a
+  convention rather than a fact.
+  It is affordable — `?limit=1` keeps it one small object however large the
+  cluster — and it fails well: an unreachable API leaves that context unknown,
+  which hides nothing and costs one word, while the cluster's own name is read
+  locally and stays on screen.
 
 ## Getting a hat
 

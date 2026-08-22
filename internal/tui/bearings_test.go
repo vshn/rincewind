@@ -144,6 +144,28 @@ func TestAFailedProbeLeavesTheChromeAsItWas(t *testing.T) {
 	}
 }
 
+// Probes run one after another, each with its own deadline, so a round can
+// outlive the TTL and land after a newer one. The newer answer must stand:
+// the label top right is the wrong place for the past.
+func TestAStaleRoundDoesNotOverwriteAFresherOne(t *testing.T) {
+	m := chrome(t, 96)
+	m.contexts = contexts(t,
+		engine.ContextDef{ID: "cluster", Script: `echo '{"n":"x"}'`, Label: ".n"})
+
+	m.refreshBearings() // the slow round, still in flight
+	slow := m.bearingsSeq
+	m.bearingsAt = time.Time{} // its TTL passes
+	m.refreshBearings()        // a fresh round starts
+	fresh := m.bearingsSeq
+
+	m.Update(bearingsMsg{found: engine.Bearings{Labels: []string{"fresh"}}, seq: fresh})
+	m.Update(bearingsMsg{found: engine.Bearings{Labels: []string{"stale"}}, seq: slow})
+
+	if !strings.Contains(top(m), "fresh") || strings.Contains(top(m), "stale") {
+		t.Errorf("the chrome reads %q, want the fresher round's answer", top(m))
+	}
+}
+
 // A bar too narrow sheds a label whole rather than clipping it, from the
 // right: half of two similar context names is the same half, and the first
 // declared is the last to go.
