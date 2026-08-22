@@ -69,11 +69,6 @@ func TestBrokenConfigsFailWithContext(t *testing.T) {
 		want []string
 	}{
 		{
-			name: "unknown field",
-			yaml: strings.Replace(valid, "emphasis:", "emphsis:", 1),
-			want: []string{"emphsis"},
-		},
-		{
 			name: "duplicate id",
 			yaml: valid + strings.TrimPrefix(valid, "\nviews:"),
 			want: []string{"demo.list", "twice"},

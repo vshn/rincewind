@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -94,17 +95,32 @@ func fromLocal(t *testing.T, dir string) {
 // cannot leak its store into the next.
 func runCmd(t *testing.T, stdin string, args ...string) (string, error) {
 	t.Helper()
+	var out bytes.Buffer
+	err := runCmdBuffers(t, stdin, &out, &out, args...)
+	return out.String(), err
+}
+
+// runCmdBuffers is runCmd with stdout and stderr apart, for the tests that
+// assert on the split itself.
+func runCmdBuffers(t *testing.T, stdin string, out, errOut io.Writer, args ...string) error {
+	t.Helper()
+	return runCmdStreams(t, strings.NewReader(stdin), out, errOut, args...)
+}
+
+// runCmdStreams additionally takes stdin as a reader, for the one test whose
+// stdin is a tripwire rather than text.
+func runCmdStreams(t *testing.T, stdin io.Reader, out, errOut io.Writer, args ...string) error {
+	t.Helper()
 	// Cobra keeps a flag's value on the command between runs, so every flag
 	// this tree has goes back to its zero value here: one test's --yes is
 	// otherwise still set when the next one asks a question.
 	hatsDirFlag, yesFlag, hatFlag = "", false, ""
 	viewParams, actParams = nil, nil
-	actAll, actYes = false, false
+	actAll, actYes, checkStrict = false, false, false
 
-	var out bytes.Buffer
-	rootCmd.SetOut(&out)
-	rootCmd.SetErr(&out)
-	rootCmd.SetIn(strings.NewReader(stdin))
+	rootCmd.SetOut(out)
+	rootCmd.SetErr(errOut)
+	rootCmd.SetIn(stdin)
 	rootCmd.SetArgs(args)
 	t.Cleanup(func() {
 		rootCmd.SetOut(nil)
@@ -113,8 +129,7 @@ func runCmd(t *testing.T, stdin string, args ...string) (string, error) {
 		rootCmd.SetArgs(nil)
 	})
 
-	err := rootCmd.Execute()
-	return out.String(), err
+	return rootCmd.Execute()
 }
 
 // The whole loop, over a real clone: install, list, remove.
@@ -415,5 +430,41 @@ func TestNoHatNamesWhatIsInstalled(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "albedaran") {
 		t.Errorf("the installed hat is not offered:\n%s", err)
+	}
+}
+
+// Install's report makes the same reading every running command makes: a hat
+// for a newer rincewind is named rather than blessed and refused on the first
+// run, and unknown keys are counted rather than silently dropped.
+func TestReportNamesAnUnmetRequirementAndUnknownKeys(t *testing.T) {
+	released(t, "v0.6.0")
+
+	tooNew := t.TempDir()
+	writeHat(t, tooNew, "hat.yaml", "rincewind: \">= 99.0\"\n"+`
+views:
+  - id: a.one
+    source: { script: "echo '{}'" }
+    rows: .
+    columns: [{name: X, expr: "1"}]
+`)
+	ahead := t.TempDir()
+	writeHat(t, ahead, "hat.yaml", aheadHat)
+
+	var out bytes.Buffer
+	err := report(&out, hats.Clone{Slug: "x/y", Hats: []hats.Hat{
+		{Name: "toonew", Path: tooNew},
+		{Name: "ahead", Path: ahead},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "needs rincewind >= 99.0.0") {
+		t.Errorf("the unmet requirement is not named:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "toonew") && strings.Contains(out.String(), "toonew         1 view") {
+		t.Errorf("a hat this build refuses to run was blessed:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "2 unknown keys") {
+		t.Errorf("the unknown keys went unmentioned:\n%s", out.String())
 	}
 }

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os/exec"
 	"strings"
@@ -32,16 +33,45 @@ var checkCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		loaded, err := config.Load(path)
+		// The report is what this command is for, so the unknown keys go to
+		// stdout with the rest of it rather than off to the side.
+		out := cmd.OutOrStdout()
+		loaded, err := loadHat(out, path)
 		if err != nil {
 			return err
 		}
 
-		out := cmd.OutOrStdout()
 		say(out, "%s: %s ok\n", path, engine.Plural(len(loaded.Views), "view"))
+		// Said even when it is met: a hat that pins a version is saying
+		// something about itself worth reading before one edits it. The
+		// comparison half is left off when nothing was compared — loadHat's
+		// "not checking" note just said so, and repeating the version here
+		// would read as if it had been measured.
+		if loaded.Requires != "" {
+			if _, checked := loaded.Unmet(version); checked {
+				say(out, "requires rincewind >= %s, and this is %s\n", loaded.Requires, version)
+			} else {
+				say(out, "requires rincewind >= %s\n", loaded.Requires)
+			}
+		}
 		reportContexts(cmd.Context(), out, loaded)
+
+		// Strict is for the hat's own pipeline: an unknown key there is a
+		// typo, because the author is by definition running the version they
+		// wrote it for.
+		if checkStrict && len(loaded.Warnings) > 0 {
+			return errors.New(engine.Plural(len(loaded.Warnings), "unknown key"))
+		}
 		return nil
 	},
+}
+
+// checkStrict makes an unknown key an error rather than a note.
+var checkStrict bool
+
+func init() {
+	checkCmd.Flags().BoolVar(&checkStrict, "strict", false,
+		"treat a key this build does not understand as an error")
 }
 
 // reportContexts resolves the hat's contexts and lays them out one to a line:

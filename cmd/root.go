@@ -14,7 +14,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vshn/rincewind/internal/config"
 	"github.com/vshn/rincewind/internal/hats"
 	"github.com/vshn/rincewind/internal/tui"
 )
@@ -44,7 +43,7 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		loaded, err := config.Load(path)
+		loaded, err := loadHat(cmd.ErrOrStderr(), path)
 		if err != nil {
 			return err
 		}

@@ -5,12 +5,15 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,8 +26,12 @@ import (
 // so a typo like "emphsis" fails with a line number instead of being
 // silently ignored.
 type file struct {
-	Views    []view     `yaml:"views"`
-	Contexts []ctxEntry `yaml:"contexts"`
+	// Rincewind is the least version of the tool this hat is written for.
+	// See Hat.Unmet: it exists for the fields whose absence is not safe to
+	// ignore, which the warning path cannot know about.
+	Rincewind string     `yaml:"rincewind"`
+	Views     []view     `yaml:"views"`
+	Contexts  []ctxEntry `yaml:"contexts"`
 }
 
 // ctxEntry is one context: a script, an optional predicate over what it
@@ -127,6 +134,111 @@ func (n *names) UnmarshalYAML(node *yaml.Node) error {
 type Hat struct {
 	Views    []engine.View
 	Contexts []engine.Context
+	// Warnings are the keys this build did not recognise. They are reported
+	// rather than refused; see decode.
+	Warnings []string
+	// Requires is the least version of the tool this hat asks for, as a
+	// normalised X.Y.Z, or empty when it asks for none. Checked here for
+	// shape and enforced by whoever knows which version is running.
+	Requires string
+	// requires is the same bound, parsed once at compile; nil when the hat
+	// asks for none. Unmet and Load's merge compare this, never the string,
+	// so a parse cannot fail — and so cannot silently waive the requirement —
+	// anywhere past compile.
+	requires *[3]int
+}
+
+// Unmet says why the running version does not satisfy the hat's `rincewind:`
+// line, or "" when it does — including when there is nothing to satisfy.
+//
+// This is the other half of the unknown-key rule. Ignoring a key from the
+// future is right for a field whose absence degrades harmlessly, which is
+// most of them: `needs:` unread means the view is shown, which is the same
+// fail-open the contexts follow. It is wrong for one whose absence is
+// dangerous — a `redact:` on a column, ignored, would show exactly what it
+// was written to hide. Only the hat's author knows which kind theirs is, so
+// only they can say so.
+//
+// checked is false when the running version says nothing that can be
+// compared, and then nothing was enforced — which the caller says out loud
+// rather than passing in silence. Passing quietly is how one tests a hat
+// locally, ships it, and hands the refusal to whoever is on a release.
+func (h Hat) Unmet(version string) (why string, checked bool) {
+	if h.requires == nil {
+		return "", true
+	}
+	got, stamped := measurable(version)
+	if !stamped {
+		return "", false
+	}
+	if slices.Compare(got[:], h.requires[:]) >= 0 {
+		return "", true
+	}
+	return fmt.Sprintf("this hat needs rincewind >= %s, and this is %s", h.Requires, version), true
+}
+
+// stamp reads the version the build writes into the binary: a tag, and
+// exactly the suffix git describe appends once there is a commit past it.
+//
+// That suffix is dropped and the tag compared, because the tag is a real
+// lower bound on what the build holds: describe names the nearest *ancestor*
+// tag, so v0.6.0-9-gb5802a3 contains v0.6.0 and demonstrably does not contain
+// v0.7.0 — or v0.7.0 would be the tag it named. Treating such a build as
+// unmeasurable would wave it past a requirement it genuinely does not meet.
+//
+// Only that suffix. Every other decoration means the number is not an
+// ancestor tag: goreleaser stamps a snapshot `incpatch`-above the nearest
+// tag — a guess upward about a build that need not contain it — and a
+// pre-release tag like v0.7.0-rc1 names a version that does not exist yet.
+// Both are unmeasurable, and the "not checking" note says so by name.
+var stamp = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)(?:-\d+-g[0-9a-f]+)?$`)
+
+// dirty marks a build made from a working tree that matched no commit.
+const dirty = "-dirty"
+
+// measurable reads a version that can be held to a requirement, and refuses
+// the two stamps that say nothing comparable.
+//
+// "dev" is a plain `go run .` and carries no version at all. A `-dirty`
+// suffix is a working tree matching no commit: the committed half is
+// measurable and the rest is unknown — and the unknown half is exactly where
+// the feature a hat is waiting for lives while someone is writing it.
+// Measuring a version that lies about its own contents is worse than
+// declining to measure.
+//
+// A clean checkout and every release stay measurable, which is what the rule
+// is for.
+func measurable(version string) ([3]int, bool) {
+	if strings.HasSuffix(version, dirty) {
+		return [3]int{}, false
+	}
+	return parseVersion(stamp, version)
+}
+
+// requirement is what a hat may write. Only a lower bound: a hat can know
+// which version first understood it, and cannot know which version will stop.
+// The patch is optional, because "0.8" is what one means.
+var requirement = regexp.MustCompile(`^\s*(?:>=\s*)?v?(\d+)\.(\d+)(?:\.(\d+))?\s*$`)
+
+func parseVersion(re *regexp.Regexp, s string) ([3]int, bool) {
+	m := re.FindStringSubmatch(s)
+	if m == nil {
+		return [3]int{}, false
+	}
+	var out [3]int
+	for i := range out {
+		if m[i+1] == "" {
+			continue
+		}
+		n, err := strconv.Atoi(m[i+1])
+		if err != nil {
+			// Atoi clamps an overflow and reports it; a number that long is
+			// not a version, not maxInt.
+			return [3]int{}, false
+		}
+		out[i] = n
+	}
+	return out, true
 }
 
 // Load reads and compiles a config file, or every *.yaml in a directory.
@@ -169,6 +281,15 @@ func Load(path string) (Hat, error) {
 		}
 		hat.Views = append(hat.Views, read.Views...)
 		hat.Contexts = append(hat.Contexts, read.Contexts...)
+		hat.Warnings = append(hat.Warnings, read.Warnings...)
+
+		// The hat requires the most any of its files requires. Refusing a
+		// second declaration would be refusing two files for agreeing, and
+		// the higher one is what "requires" means anyway.
+		if read.requires != nil &&
+			(hat.requires == nil || slices.Compare(read.requires[:], hat.requires[:]) > 0) {
+			hat.Requires, hat.requires = read.Requires, read.requires
+		}
 	}
 
 	// One view may open another declared in a different file, and may name a
@@ -191,6 +312,11 @@ func loadFile(path string) (Hat, error) {
 	hat, err := compile(f)
 	if err != nil {
 		return Hat{}, fmt.Errorf("%s: %w", path, err)
+	}
+	// Named the way the errors are: a warning about line 14 is no use
+	// without the file it is line 14 of.
+	for i, w := range hat.Warnings {
+		hat.Warnings[i] = path + ": " + w
 	}
 	return hat, nil
 }
@@ -216,11 +342,20 @@ func compile(r io.Reader) (Hat, error) {
 	dec.KnownFields(true)
 
 	var doc file
-	if err := dec.Decode(&doc); err != nil {
+	warnings, err := decode(dec, &doc)
+	if err != nil {
 		return Hat{}, err
 	}
 
-	var hat Hat
+	hat := Hat{Warnings: warnings}
+	if doc.Rincewind != "" {
+		want, ok := parseVersion(requirement, doc.Rincewind)
+		if !ok {
+			return Hat{}, fmt.Errorf("rincewind: %q is not a version requirement; write \">= 0.8\" or \">= 0.8.1\"", doc.Rincewind)
+		}
+		hat.Requires = fmt.Sprintf("%d.%d.%d", want[0], want[1], want[2])
+		hat.requires = &want
+	}
 	seen := map[string]bool{}
 	for _, c := range doc.Contexts {
 		def, err := toContextDef(c)
@@ -251,6 +386,85 @@ func compile(r io.Reader) (Hat, error) {
 		hat.Views = append(hat.Views, compiled)
 	}
 	return hat, nil
+}
+
+// decode reads the document strictly and then splits what strictness caught
+// in two.
+//
+// A key the schema does not know is not a mistake this build can recognise as
+// one. It is either a typo or a hat written for a newer rincewind, and
+// nothing in the file distinguishes them — so refusing both alike means one
+// person adding a field to a shared hat takes the whole tool away from
+// everyone who has not upgraded yet. A hat travels separately from the
+// binary; that is the arrangement, and a schema that cannot grow without
+// breaking it is not one.
+//
+// So an unknown key is reported and ignored, and every other type error still
+// kills the load. Nothing else about "config mistakes die at load time"
+// changes: everything the schema *does* know is still held to it here.
+//
+// The document is fully decoded either way — the decoder collects its type
+// errors and carries on — so there is no second pass.
+func decode(dec *yaml.Decoder, doc *file) ([]string, error) {
+	err := dec.Decode(doc)
+	if err == nil {
+		return nil, nil
+	}
+	var te *yaml.TypeError
+	if !errors.As(err, &te) {
+		return nil, err
+	}
+
+	var warnings []string
+	var fatal []string
+	for _, e := range te.Errors {
+		if unknown, ok := unknownKey(e); ok {
+			warnings = append(warnings, unknown)
+			continue
+		}
+		fatal = append(fatal, e)
+	}
+	if len(fatal) > 0 {
+		return nil, &yaml.TypeError{Errors: fatal}
+	}
+	return warnings, nil
+}
+
+// unknownField is what the decoder says about a key the schema does not
+// declare. Reading its own message back is the price of letting the library
+// do the matching: the alternative is a second list of every key in the
+// schema, kept beside the structs, which would go stale the first time
+// someone added one.
+// The key is `.+?` rather than `\S+`: the decoder interpolates it raw, and a
+// quoted YAML key may hold whitespace — one of those must stay a warning, not
+// fall through to fatal.
+var unknownField = regexp.MustCompile(`^line (\d+): field (.+?) not found in type (\S+)$`)
+
+// unknownKey reshapes that message into one a hat's author can act on. The Go
+// type name is no use to them; the line and the word are.
+func unknownKey(msg string) (string, bool) {
+	m := unknownField.FindStringSubmatch(msg)
+	if m == nil {
+		return "", false
+	}
+	where, named := schemaNames[m[3]]
+	if !named {
+		where = strings.TrimPrefix(m[3], "config.")
+	}
+	return fmt.Sprintf("line %s: unknown key %q in %s", m[1], m[2], where), true
+}
+
+// schemaNames says what each of the schema's types is called in the language
+// a hat is written in.
+var schemaNames = map[string]string{
+	"config.file":     "a hat",
+	"config.view":     "a view",
+	"config.ctxEntry": "a context",
+	"config.source":   "a source",
+	"config.param":    "a parameter",
+	"config.action":   "an action",
+	"config.column":   "a column",
+	"config.sortBy":   "a sort key",
 }
 
 // link resolves navigating actions, holds every `needs:` to a context that
