@@ -232,12 +232,22 @@ so it is simply not listed, and an action reaches it.
 ## Config schema
 
 ```yaml
+contexts:                    # optional; see "Where one is"
+  - id: cloudscale           # unique across the whole hat, [a-z][a-z0-9_-]*
+    short: Cloudscale-managed clusters
+    source:
+      script: kubectl config view --minify -o json
+    active: '."current-context" | test("-cloudscale-")'   # optional predicate
+    label: '"cloudscale"'    # optional; what it adds to the chrome
+    tools: [cloudscale-cli]  # reported by check, and gates nothing
+
 views:
   - id: argo.apps            # unique, required; the part before the first
                              # dot groups the sidebar, the rest is the menu
                              # label — an id without a dot is ungrouped
     title: Argo applications # description, shown in the title bar; default: id
     class: table             # optional; table (default), text or chart
+    needs: cloudscale        # optional; a context id or a list of them
     refresh: 30s             # optional auto-reload; manual r always works
     follow: false            # optional; text only, and excludes refresh
     source:
@@ -555,6 +565,14 @@ With `--yes` the question is still *said*, just not asked:
 the hat puts its warning in the confirmation text,
 and agreeing in advance is not a reason never to have been told.
 
+**The context is named above the plan**, when the hat has one to name:
+`context: c-appuio-lab-cloudscale-rma-0 · cloudscale`.
+In CI `act … --yes` said nothing at all about which cluster it was hitting,
+and "the command is on screen before it runs" has to cover the place too —
+a command without it is only half of what is about to happen.
+It goes to stderr with the rest of the transcript,
+and a hat that resolves no label gets no line: an empty heading is not one.
+
 **The transcript goes to stderr and the results to stdout.**
 The same split `view` makes for its notes, and for the same reason:
 the plan and the question are diagnostics,
@@ -567,51 +585,144 @@ and the count becomes the exit status —
 Drill-down out here is composition — run the target view with `-p` —
 and the refusal hands over that command line rather than reimplementing it.
 
-## The cluster
+## Where one is
 
-The kubectl context is shown **top right**, in the title bar,
-because acting on the wrong cluster is the expensive mistake this tool can help make.
+A hat serves a team, and a team's clusters sit on different platforms.
+Views that only make sense on one of them are noise everywhere else.
+
+One construct answers that: a list of **contexts**,
+each a script that prints JSON with jq expressions over it.
+A context says whether it applies here,
+what it is called here, and what it needs to work.
+
+```yaml
+contexts:
+  - id: kubernetes
+    source:
+      script: kubectl config view --minify -o json
+    label: '."current-context"'          # what it contributes to the chrome
+    tools: [kubectl]
+    # no active: → active whenever the script produced a value
+
+  - id: cloudscale
+    short: Cloudscale-managed clusters
+    source:
+      script: kubectl config view --minify -o json
+    active: '."current-context" | test("-cloudscale-")'
+    label: '"cloudscale"'
+    tools: [cloudscale-cli]
+
+views:
+  - id: nodes.volumes
+    needs: cloudscale                    # string or list; absent means always shown
+```
+
+The chrome then reads `c-appuio-lab-cloudscale-rma-0 · cloudscale`.
+
+The cluster's identity is not a separate construct beside this one:
+it is the entry above with a computed label and no predicate.
+That is what makes the name honest —
+"which contexts am I in" covers both the identity and the condition,
+where a *capability* carrying a cluster name would not.
+
+Six rules decide the whole design.
+
+**A script always prints JSON**, and `label` and `active` are jq over it.
+There is no text mode here;
+that is what `class: text` is for, on views.
+A context that prints several values is read for its first:
+the question is what one is in the middle of, and there is one answer.
+
+**The hat asks the question, the world answers it.**
+A hat may never declare *that* it is on production — only how to find out.
+This is what keeps "which cluster one is pointed at cannot come from the hat"
+true now that the hat is the one doing the asking:
+the hat supplies the question, the world supplies the answer,
+and a hat that lied about it would be lying about `kubectl config` too.
+
+**`active:` is optional**, and absent means active whenever the script
+produced a value.
+A context with neither `active:` nor `label:` says nothing
+and is refused at load time.
+
+**Fail open.**
+A context has three states — active, inactive, unknown —
+explicitly typed, because a bool cannot say the third,
+and the third is the one that matters.
+A probe that could not run is unknown, and unknown hides nothing.
+A view is hidden only when *every* context it names is definitively inactive:
+one active or unknown one shows it.
+Nothing is hidden before the first round either,
+which falls out of the ordering rather than needing a rule of its own —
+resolution is a `tea.Cmd` like every other script run,
+so the menu is complete until the answer lands.
+
+**Hiding is a filter, not a deletion.**
+The sidebar says how many are hidden, in its bottom border,
+and `H` brings them back — marked, and naming the context they wait for.
+The list is rebuilt when what belongs in it changes,
+rather than filtered while it is painted:
+painting stays free of decisions,
+and the cursor can never come to rest on a line that is not there.
+A hidden view is still perfectly runnable:
+`rincewind view nodes.volumes` runs it, and so does `act`.
+Asking for something by name is not the same as being offered it in a menu —
+`Listed()` already stopped gating the CLI when `-p` arrived.
+
+**`tools:` gates nothing.**
+A missing binary is actionable news — install it —
+and a view that hid itself over one would hide the finding.
+`check` reports what is on `PATH`,
+and the script's own `command not found` does the rest.
+
+**The cadence is one round for all of them**, on the trigger the cluster probe
+always used: the view on screen changing, behind a two-second TTL that
+collapses a held-down tab key into one round.
+There is deliberately no per-context cadence and no cache key.
+A context is expected to be cheap —
+the platform usually falls out of the same local kubeconfig read as the
+label — and **identical sources run once per round**,
+keyed on shell and script inside `Resolve`,
+so two contexts reading one kubeconfig read it once.
+A hat that writes an expensive probe can cache in its own script;
+building a caching mechanism here on speculation would be the wrong shape
+committed to early.
+Each script gets its own deadline: a hanging probe must not hang the tool.
+
+**Shown top right**, in the title bar, because acting on the wrong cluster is
+the expensive mistake this tool can help make.
 The right edge is the same column on every screen,
-where a left-aligned label would shift with the length of the view id beside it —
-which is what lets it be found without being read.
+where a left-aligned label would shift with the length of the view id beside
+it — which is what lets it be found without being read.
+The title yields to the labels, never the other way round.
+Too narrow sheds a label whole, from the right,
+rather than clipping one: half of two similar context names is the same half.
+Which is what makes the order the hat declared them in worth having —
+the first declared is the last to go.
 
-It is asked for by running `kubectl config current-context`,
-which is the one place in this tool's Go code that names a producer.
-The exception is deliberate and narrow.
-Everywhere else kubectl is hat business,
-but *which* cluster one is pointed at cannot come from the hat:
-a hat is a set of views, and the answer changes without any of them changing.
-Reading it from the same kubeconfig the scripts read
-is what makes the display and the scripts agree.
+**The TUI stays quiet about a probe that failed.**
+Nothing is hidden on its account, so there is nothing to explain;
+`check` is where it is reported, with the script's own stderr.
 
-**The context, not reachability.**
-`current-context` reads `~/.kube/config` and answers in tens of milliseconds;
-asking the API server whether it is up costs a round trip on every view change,
-and would blank the display exactly when a cluster is unwell —
+### The kubectl context, now the fallback
+
+A hat that declares no contexts still gets its cluster shown:
+`kubectl config current-context`, read the one way Go knows.
+That keeps every hat written before contexts existed exactly as it was;
+taking the Go special case away altogether
+is a later decision, to be taken on its own.
+
+**The context, never reachability.**
+`current-context` reads `~/.kube/config` and answers in tens of milliseconds,
+where asking the API server whether it is up costs a round trip on every view
+change — and would blank the display exactly when a cluster is unwell,
 which is when knowing which cluster it is matters most.
 Whether it answers at all is what running a view already tells you.
-
-**Asked again whenever the view on screen changes.**
-Once at startup would go stale
-the moment someone switches context in another terminal,
-and stale is worse than absent for something read before a mutation.
-A two-second TTL collapses a held-down tab key into one run.
-The hook sits in one place — the key handler compares the view before and after —
-rather than in `open`, `drill`, `activate` and `closeTab`,
-which would drift apart.
-
-**The title yields to it, and a bar too narrow for both drops it whole.**
-What the view is called matters less than which cluster it is showing;
-and half of two similar context names is the same half,
-so a clipped one is worse than none.
 
 **No answer means nothing is shown**, and no room is taken.
 No kubectl, or no current context, is not a cluster session;
 a probe that fails has nothing one could act on,
 and a broken cluster is reported by the views themselves.
-`example`, which invents its data, is the case to keep in mind:
-what is shown is the context the scripts *would* use,
-which is the truth a hat cannot override.
 
 ## Getting a hat
 
@@ -856,10 +967,12 @@ internal/
   config/          YAML → typed defs; schema validation; hands off to engine
   engine/          Def → compiled View; script runner, JSON stream decode,
                    gojq evaluation, sort, formats; Result/Row/Cell types,
-                   and the line stream a followed view is read through
+                   the line stream a followed view is read through, and
+                   context.go: contexts, their three states and Resolve
   hats/            the store: GitHub sources, clone scanning, git, search
   render/          Result → styled lines (style-after-layout)
-  tui/             bubbletea model: sidebar, table pane, filter, selection
+  tui/             bubbletea model: sidebar, table pane, filter, selection,
+                   and bearings.go: resolving the contexts and showing them
 example/           a hat that invents its data, and the config fixture
 ```
 
@@ -978,6 +1091,19 @@ example/           a hat that invents its data, and the config fixture
 | An action parameter may not shadow the view's or an `env:` name | Then the precedence is unobservable, and there is one fewer rule to remember |
 | Per-row invocations replace the old `kubectl -f -` List document | Each call names one object, so a partial failure is attributable |
 | The argo "root rider" is an instruction, not a hidden mutation | The old pause silently patched `root` too; a mutation nobody selected is what the selection rule exists to prevent |
+| One construct — contexts — rather than a cluster key beside a list of capabilities | Identity is not a capability, and a capability carrying a cluster name is nonsense; "which contexts am I in" covers the identity and the condition in one word, and the identity is just the entry with a label and no predicate |
+| A context's script prints JSON, like every other source | `active` and `label` are jq, and jq has nothing to say about prose; taking output as lines is a view's business, which is what `class: text` is for |
+| The hat asks the question and the world answers it | A hat that could declare *that* it is on production would break the one invariant the cluster display exists to keep; supplying the question is not supplying the answer |
+| `active:` is optional, and absent means "the script answered" | The identity case has no condition to write, and forcing `active: true` on it would be a ritual; one that declares neither `active:` nor `label:` says nothing and is refused |
+| Three states, and unknown hides nothing | A bool cannot say "the probe could not run", which is exactly the state that must not hide a view — a slow or broken probe taking half the menu away is worse than showing a view that does not apply |
+| A view is hidden only when *every* context it names is inactive | `needs: [a, b]` reads as "belongs to either"; requiring all of them would make two contexts unusable together |
+| Hiding is a reversible filter, and the count is in the border | A menu that quietly dropped four entries is a tool one cannot trust; `H` is the way back, upper case because the lower-case keys belong to the views |
+| The menu is rebuilt rather than filtered while painting | Painting must stay free of decisions, and the cursor must never be able to come to rest on a line that is not there |
+| `needs:` does not gate `view` and `act` | Asking for something by name is not being offered it in a menu, and `Listed()` already stopped gating the CLI when `-p` arrived; the cost is one round trip to produce an error the tool could have predicted, which is the cheaper of the two mistakes |
+| `tools:` gates nothing; `check` reports it | A missing binary is actionable news, and a view that hid itself over one would hide the finding |
+| One cadence for every context, and no cache key | A context is expected to be cheap and identical sources already run once per round; a caching mechanism built on speculation is the wrong shape committed to early, and a hat with an expensive probe can cache in its own script |
+| Identical sources run once per round | The platform and the cluster name usually fall out of the same kubeconfig read, and reading it twice per view change is a cost with nothing to show for it |
+| `act` names the context above the plan | In CI `act … --yes` said nothing at all about which cluster it hit; "the command is on screen before it runs" has to cover the place as well as the command |
 | A hat is a directory, one file per group | Sixteen views in one file is unreadable; it is also how they were arranged as Go source |
 | `--hat` has no short form; `-h` is help | The frequency argument that once justified taking `-h` went away when `$RINCEWIND_HAT` became the way to choose a hat: what is left is a universal convention, broken for three saved characters |
 | The mouse toggle is `M`, not `m` | Lower-case letters belong to the views, which have far more use for them than one global toggle |
