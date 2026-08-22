@@ -62,11 +62,11 @@ var actCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return runAct(cmd, v, a, args[2:])
+		return runAct(cmd, loaded.Contexts, v, a, args[2:])
 	},
 }
 
-func runAct(cmd *cobra.Command, v engine.View, a engine.Action, keys []string) error {
+func runAct(cmd *cobra.Command, contexts []engine.Context, v engine.View, a engine.Action, keys []string) error {
 	out, errOut, in := cmd.OutOrStdout(), cmd.ErrOrStderr(), cmd.InOrStdin()
 
 	// Navigating is looking, and looking is what `view` does. The refusal
@@ -96,6 +96,7 @@ func runAct(cmd *cobra.Command, v engine.View, a engine.Action, keys []string) e
 	if err != nil {
 		return err
 	}
+	writeBearings(cmd.Context(), errOut, contexts)
 	writePlan(errOut, a, steps)
 
 	// The question is asked about the same values the commands were built
@@ -292,6 +293,24 @@ func paramValues(a engine.Action, args engine.Args) map[string]string {
 		}
 	}
 	return out
+}
+
+// writeBearings names where the work is about to happen, above the plan.
+// `act … --yes` in a CI job said nothing at all about which cluster it was
+// hitting, and "the command is on screen before it runs" has to cover that
+// too: the command means little without the place.
+//
+// Nothing resolved is no line at all. An empty label is not a heading, and a
+// hat that declares no contexts has nothing to say here.
+func writeBearings(ctx context.Context, w io.Writer, contexts []engine.Context) {
+	if len(contexts) == 0 {
+		return
+	}
+	found := engine.Resolve(ctx, contexts)
+	if len(found.Labels) == 0 {
+		return
+	}
+	say(w, "context: %s\n\n", strings.Join(found.Labels, " · "))
 }
 
 // writePlan prints what is about to run, one invocation per row. Not one
