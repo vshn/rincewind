@@ -44,6 +44,11 @@ var checkCmd = &cobra.Command{
 		}
 
 		say(out, "%s: %s ok\n", path, engine.Plural(len(loaded.Views), "view"))
+		// Said even when it is met: a hat that pins a version is saying
+		// something about itself worth reading before one edits it.
+		if loaded.Requires != "" {
+			say(out, "requires rincewind >= %s, and this is %s\n", loaded.Requires, version)
+		}
 		reportContexts(cmd.Context(), out, loaded)
 
 		// Strict is for the hat's own pipeline: an unknown key there is a

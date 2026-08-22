@@ -153,3 +153,114 @@ views:
 		t.Errorf("%d rows, want the view to run as usual", len(res.Rows))
 	}
 }
+
+// A hat may name the least version it is written for, when a field's absence
+// would be dangerous rather than harmless — which the warning path above
+// cannot know about and only the author can say.
+func TestAHatMayRequireAVersion(t *testing.T) {
+	for _, tc := range []struct {
+		written string
+		want    string
+	}{
+		{`">= 0.8"`, "0.8.0"},
+		{`">=0.8.1"`, "0.8.1"},
+		{`"0.9.3"`, "0.9.3"},
+		{`">= v1.0"`, "1.0.0"},
+	} {
+		t.Run(tc.written, func(t *testing.T) {
+			loaded, err := Parse(strings.NewReader("rincewind: " + tc.written + "\n" + valid))
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Normalised, so what is reported reads the same however it was
+			// written.
+			if loaded.Requires != tc.want {
+				t.Errorf("requires %q, want %q", loaded.Requires, tc.want)
+			}
+		})
+	}
+}
+
+func TestARequirementThatIsNotOneIsRefused(t *testing.T) {
+	for _, written := range []string{`"neulich"`, `"> 0.8"`, `"< 2.0"`, `"0.8.x"`, `"~> 0.8"`} {
+		t.Run(written, func(t *testing.T) {
+			_, err := Parse(strings.NewReader("rincewind: " + written + "\n" + valid))
+			if err == nil {
+				t.Fatal("loaded")
+			}
+			if !strings.Contains(err.Error(), "is not a version requirement") {
+				t.Errorf("the error %q does not say what is wrong", err)
+			}
+		})
+	}
+}
+
+func TestUnmet(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		requires string
+		version  string
+		unmet    bool
+		checked  bool
+	}{
+		{"met exactly", "0.8.0", "v0.8.0", false, true},
+		{"met by a later release", "0.8.0", "v0.9.1", false, true},
+		{"met by a later major", "0.8.0", "v1.0.0", false, true},
+		{"unmet", "0.8.0", "v0.6.0", true, true},
+		{"unmet by a patch", "0.6.1", "v0.6.0", true, true},
+		{"nothing required", "", "v0.1.0", false, true},
+
+		// git describe names the nearest ancestor tag, so the tag in the
+		// stamp is a real lower bound on what the build holds — and a real
+		// upper one on what it does not. Both directions are measured.
+		{"a build past a tag that meets it", "0.8.0", "v0.8.0-3-gabc123", false, true},
+		{"a build past a tag that does not", "0.8.0", "v0.6.0-9-gb5802a3", true, true},
+
+		// The two stamps that say nothing comparable: no version at all, and
+		// a working tree matching no commit — where the feature the hat is
+		// waiting for lives while someone is writing it.
+		{"a plain go run", "0.8.0", "dev", false, false},
+		{"a dirty working tree", "0.8.0", "v0.6.0-9-gb5802a3-dirty", false, false},
+		{"a dirty tree on a tag", "0.8.0", "v0.6.0-dirty", false, false},
+		{"a plain go run with nothing to check", "", "dev", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			why, checked := Hat{Requires: tc.requires}.Unmet(tc.version)
+			if checked != tc.checked {
+				t.Errorf("checked is %v, want %v", checked, tc.checked)
+			}
+			if tc.unmet && why == "" {
+				t.Errorf("%s satisfies >= %s, want it refused", tc.version, tc.requires)
+			}
+			if !tc.unmet && why != "" {
+				t.Errorf("%s does not satisfy >= %s: %s", tc.version, tc.requires, why)
+			}
+			if tc.unmet && !strings.Contains(why, tc.version) {
+				t.Errorf("the reason %q does not name the running version", why)
+			}
+		})
+	}
+}
+
+// The hat requires the most any of its files requires: refusing a second
+// declaration would be refusing two files for agreeing.
+func TestTheHighestRequirementWins(t *testing.T) {
+	body := `
+views:
+  - id: %s
+    source: { script: "echo '{}'" }
+    rows: .
+    columns: [{name: X, expr: "1"}]
+`
+	loaded, err := hatDir(t, map[string]string{
+		"a.yaml": "rincewind: \">= 0.8\"\n" + strings.Replace(body, "%s", "a.one", 1),
+		"b.yaml": "rincewind: \">= 0.9.2\"\n" + strings.Replace(body, "%s", "b.two", 1),
+		"c.yaml": strings.Replace(body, "%s", "c.three", 1),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Requires != "0.9.2" {
+		t.Errorf("requires %q, want the highest of the three", loaded.Requires)
+	}
+}

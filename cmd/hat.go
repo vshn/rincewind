@@ -21,6 +21,25 @@ func loadHat(w io.Writer, path string) (config.Hat, error) {
 	if err != nil {
 		return config.Hat{}, err
 	}
+
+	// Before the unknown keys, not after: a hat too new for this build will
+	// have some, and listing them under the one line that actually explains
+	// the situation would bury it.
+	why, checked := hat.Unmet(version)
+	if why != "" {
+		return config.Hat{}, fmt.Errorf(
+			"%s\n\nupgrade rincewind, or use a revision of %s written for this one", why, path)
+	}
+	// A build that cannot be measured is not one to refuse — but saying
+	// nothing would let one test a hat here, ship it, and hand the refusal to
+	// whoever is running a release. The stamp is named rather than
+	// interpreted: "dev" and a "-dirty" tree fail to compare for different
+	// reasons, and both are legible to whoever is looking at them.
+	if !checked {
+		say(w, "not checking that this hat wants rincewind >= %s: %s cannot be compared to it\n\n",
+			hat.Requires, version)
+	}
+
 	sayUnknown(w, hat.Warnings)
 	return hat, nil
 }

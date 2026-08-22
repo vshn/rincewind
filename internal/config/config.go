@@ -5,6 +5,7 @@
 package config
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,8 +26,12 @@ import (
 // so a typo like "emphsis" fails with a line number instead of being
 // silently ignored.
 type file struct {
-	Views    []view     `yaml:"views"`
-	Contexts []ctxEntry `yaml:"contexts"`
+	// Rincewind is the least version of the tool this hat is written for.
+	// See Hat.Unmet: it exists for the fields whose absence is not safe to
+	// ignore, which the warning path cannot know about.
+	Rincewind string     `yaml:"rincewind"`
+	Views     []view     `yaml:"views"`
+	Contexts  []ctxEntry `yaml:"contexts"`
 }
 
 // ctxEntry is one context: a script, an optional predicate over what it
@@ -131,6 +137,103 @@ type Hat struct {
 	// Warnings are the keys this build did not recognise. They are reported
 	// rather than refused; see decode.
 	Warnings []string
+	// Requires is the least version of the tool this hat asks for, as a
+	// normalised X.Y.Z, or empty when it asks for none. Checked here for
+	// shape and enforced by whoever knows which version is running.
+	Requires string
+}
+
+// Unmet says why the running version does not satisfy the hat's `rincewind:`
+// line, or "" when it does — including when there is nothing to satisfy.
+//
+// This is the other half of the unknown-key rule. Ignoring a key from the
+// future is right for a field whose absence degrades harmlessly, which is
+// most of them: `needs:` unread means the view is shown, which is the same
+// fail-open the contexts follow. It is wrong for one whose absence is
+// dangerous — a `redact:` on a column, ignored, would show exactly what it
+// was written to hide. Only the hat's author knows which kind theirs is, so
+// only they can say so.
+//
+// checked is false when the running version says nothing that can be
+// compared, and then nothing was enforced — which the caller says out loud
+// rather than passing in silence. Passing quietly is how one tests a hat
+// locally, ships it, and hands the refusal to whoever is on a release.
+func (h Hat) Unmet(version string) (why string, checked bool) {
+	if h.Requires == "" {
+		return "", true
+	}
+	want, ok := parseVersion(requirement, h.Requires)
+	if !ok {
+		return "", true
+	}
+	got, stamped := measurable(version)
+	if !stamped {
+		return "", false
+	}
+	if compareVersion(got, want) >= 0 {
+		return "", true
+	}
+	return fmt.Sprintf("this hat needs rincewind >= %s, and this is %s", h.Requires, version), true
+}
+
+// stamp reads the version the build writes into the binary: a tag, and
+// whatever git describe appended once there was a commit past it.
+//
+// The suffix is dropped and the tag compared, because the tag is a real lower
+// bound on what the build holds: describe names the nearest *ancestor* tag,
+// so v0.6.0-9-gb5802a3 contains v0.6.0 and demonstrably does not contain
+// v0.7.0 — or v0.7.0 would be the tag it named. Treating such a build as
+// unmeasurable would wave it past a requirement it genuinely does not meet.
+var stamp = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$`)
+
+// dirty marks a build made from a working tree that matched no commit.
+const dirty = "-dirty"
+
+// measurable reads a version that can be held to a requirement, and refuses
+// the two stamps that say nothing comparable.
+//
+// "dev" is a plain `go run .` and carries no version at all. A `-dirty`
+// suffix is a working tree matching no commit: the committed half is
+// measurable and the rest is unknown — and the unknown half is exactly where
+// the feature a hat is waiting for lives while someone is writing it.
+// Measuring a version that lies about its own contents is worse than
+// declining to measure.
+//
+// A clean checkout and every release stay measurable, which is what the rule
+// is for.
+func measurable(version string) ([3]int, bool) {
+	if strings.HasSuffix(version, dirty) {
+		return [3]int{}, false
+	}
+	return parseVersion(stamp, version)
+}
+
+// requirement is what a hat may write. Only a lower bound: a hat can know
+// which version first understood it, and cannot know which version will stop.
+// The patch is optional, because "0.8" is what one means.
+var requirement = regexp.MustCompile(`^\s*(?:>=\s*)?v?(\d+)\.(\d+)(?:\.(\d+))?\s*$`)
+
+func parseVersion(re *regexp.Regexp, s string) ([3]int, bool) {
+	m := re.FindStringSubmatch(s)
+	if m == nil {
+		return [3]int{}, false
+	}
+	var out [3]int
+	for i := range out {
+		if m[i+1] != "" {
+			out[i], _ = strconv.Atoi(m[i+1])
+		}
+	}
+	return out, true
+}
+
+func compareVersion(a, b [3]int) int {
+	for i := range a {
+		if c := cmp.Compare(a[i], b[i]); c != 0 {
+			return c
+		}
+	}
+	return 0
 }
 
 // Load reads and compiles a config file, or every *.yaml in a directory.
@@ -174,6 +277,19 @@ func Load(path string) (Hat, error) {
 		hat.Views = append(hat.Views, read.Views...)
 		hat.Contexts = append(hat.Contexts, read.Contexts...)
 		hat.Warnings = append(hat.Warnings, read.Warnings...)
+
+		// The hat requires the most any of its files requires. Refusing a
+		// second declaration would be refusing two files for agreeing, and
+		// the higher one is what "requires" means anyway.
+		if hat.Requires == "" {
+			hat.Requires = read.Requires
+		} else if read.Requires != "" {
+			a, _ := parseVersion(requirement, hat.Requires)
+			b, _ := parseVersion(requirement, read.Requires)
+			if compareVersion(b, a) > 0 {
+				hat.Requires = read.Requires
+			}
+		}
 	}
 
 	// One view may open another declared in a different file, and may name a
@@ -232,6 +348,13 @@ func compile(r io.Reader) (Hat, error) {
 	}
 
 	hat := Hat{Warnings: warnings}
+	if doc.Rincewind != "" {
+		want, ok := parseVersion(requirement, doc.Rincewind)
+		if !ok {
+			return Hat{}, fmt.Errorf("rincewind: %q is not a version requirement; write \">= 0.8\" or \">= 0.8.1\"", doc.Rincewind)
+		}
+		hat.Requires = fmt.Sprintf("%d.%d.%d", want[0], want[1], want[2])
+	}
 	seen := map[string]bool{}
 	for _, c := range doc.Contexts {
 		def, err := toContextDef(c)
