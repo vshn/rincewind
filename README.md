@@ -48,10 +48,8 @@ Actions come in two kinds, and both open a tab.
 `script:` does work — once per **selected** row,
 with values derived by jq reaching the script as environment variables,
 never templated into it.
-
-A working action opens its tab,
-collects any parameters it needs one field at a time,
-then shows the exact invocations it is about to make and asks underneath them:
+A working action collects its parameters,
+then shows the exact invocations and asks underneath them:
 
 ```
 pause  infra
@@ -61,9 +59,13 @@ pause  infra
   machineconfigpool/infra patched
 ```
 
-So you confirm with the command in front of you,
+You confirm with the command in front of you,
 the output lands beside the call that produced it,
 and `esc` takes you back to the list untouched.
+
+[docs/hat.md](docs/hat.md) is the complete schema reference;
+[example/](example/) is a hat that invents its own data —
+no cluster needed, and the place to start when writing your own.
 
 ## Use
 
@@ -79,24 +81,24 @@ rincewind view nodes.status    # print one view and exit, no TUI
 rincewind act nodes.status cordon node-a   # run one of its actions
 ```
 
-A hat is found with `--hat`, else `$RINCEWIND_HAT`. There is no third step: with
-neither given, rincewind says so and lists what is installed, rather than
-guessing which cluster you meant.
+A hat is found with `--hat`, else `$RINCEWIND_HAT`;
+with neither given, rincewind lists what is installed rather than guessing.
 
-`hats install` clones into `~/.config/rincewind/` (or `--dir`, or
-`$RINCEWIND_HATS_DIR`), one flat directory per repository. `hats update`
-fetches, shows you the diff, and asks before applying it; `hats list` prints
-the paths, and `hats remove` deletes a clone. **A hat is shell scripts that run as you, against your cluster** —
-the topic search is discovery, not a registry, so read one before installing
-it.
+`hats install` clones into `~/.config/rincewind/`
+(or `--dir`, or `$RINCEWIND_HATS_DIR`).
+`hats update` fetches, shows the diff, and asks before applying;
+`hats list` prints the paths, `hats remove` deletes a clone.
+**A hat is shell scripts that run as you, against your cluster** —
+the topic search is discovery, not a registry,
+so read one before installing it.
 
-`view` writes a table column-aligned, a log verbatim, and a followed view as
-it streams. Colour is used only when the output is a terminal, so piping into
-a file gives plain text; cell errors go to stderr, out of the way of it. A
-view that declares parameters takes them as `-p name=value`.
+`view` prints a table column-aligned, a log verbatim,
+and a followed view as it streams;
+colour only when stdout is a terminal, cell errors to stderr.
+Parameters are `-p name=value`.
 
-`act` runs one of a view's actions without the TUI. Rows are named by their
-key — run it without any to see them, or `--all` for every row:
+`act` runs one of a view's actions without the TUI,
+rows named by their key — run it without any to see them, or `--all`:
 
 ```
 $ rincewind act argo.apps sync wildfly
@@ -110,71 +112,33 @@ sync  wildfly
 Sync wildfly (1 row) [y/N]
 ```
 
-Same order as the TUI — collect, plan, ask, run — and the same engine
-underneath. The plan and the question go to stderr and only what the scripts
-printed goes to stdout, so a redirect catches the results rather than the
-transcript. `-p name=value` supplies parameters, a terminal is asked for
-whatever is left, and `--yes` skips the question but never the plan. `-` reads
-the keys from stdin, which is how it composes:
+Same order as the TUI — collect, plan, ask, run — and the same engine.
+The plan and the question go to stderr, the scripts' output to stdout,
+so a redirect catches the results rather than the transcript.
+`--yes` skips the question but never the plan;
+`-` reads the keys from stdin, which is how it composes:
 
 ```
 rincewind view argo.apps | awk '$2=="OutOfSync" {print $1}' \
   | rincewind act argo.apps sync - --yes
 ```
 
-A view whose output is a log rather than a table is `class: text`:
-the lines arrive verbatim, `/` greps them, and the arrows scroll.
-Add `follow: true` and they arrive as the script writes them,
-with `esc` to stop and `r` to start again.
-Following pauses while its tab is in the background,
-so nothing keeps running behind a tab nobody is looking at.
+A log is `class: text`: lines verbatim, `/` greps, arrows scroll;
+`follow: true` streams them as the script writes them.
+Time series are `class: chart`,
+drawn as a braille plot with a legend.
 
-A view of time series is `class: chart`:
-`rows` shapes the same JSON stream into series —
-`{name, points: [[t, v], …]}`, one jq step from a Prometheus `query_range` —
-drawn as a braille plot with a legend, later series on top.
-`/` picks series by name, `yrange:` fixes the value axis,
-and [example/metrics.yaml](example/metrics.yaml) is the reference.
-
-A hat serves a team, and a team's clusters sit on different platforms.
-**Contexts** say where you are, so the views that only make sense elsewhere
-can get out of the way. A context is a script that prints JSON, with jq over
-it:
-
-```yaml
-contexts:
-  - id: kubernetes
-    source:
-      script: kubectl config view --minify -o json
-    label: '."current-context"'          # what it contributes to the chrome
-    tools: [kubectl]
-    # no active: → active whenever the script produced a value
-
-  - id: cloudscale
-    short: Cloudscale-managed clusters
-    source:
-      script: kubectl config view --minify -o json
-    active: '."current-context" | test("-cloudscale-")'
-    label: '"cloudscale"'
-    tools: [cloudscale-cli]
-
-views:
-  - id: nodes.volumes
-    needs: cloudscale                    # string or list; absent means always shown
-```
-
-The labels are shown top right — `c-appuio-lab-cloudscale-rma-0 · cloudscale` —
-and asked for again whenever the view changes, so what you are about to act on
-is on screen before you act. The hat only ever says how to find out, never
-where it is: that answer has to come from the world.
-
-A view is hidden only when **every** context it names is definitively
-inactive. A probe that could not run hides nothing. The sidebar says how many
-it left out and `H` brings them back, marked with the context they are waiting
-for — and a hidden view still runs perfectly well by name. `tools:` gates
-nothing at all: `rincewind check` reports what is missing, because a binary
-you have not installed is news, not a reason to hide the view that would have
-told you.
+**Contexts** say where you are.
+A context is a script printing JSON with jq over it;
+the labels are shown top right —
+`c-appuio-lab-cloudscale-rma-0 · cloudscale` —
+and asked for again whenever the view changes,
+so what you are about to act on is on screen before you act.
+Views that `needs:` a context leave the menu where it is definitively
+inactive; a probe that could not run hides nothing,
+`H` brings hidden views back, and they still run by name.
+`rincewind check` reports each context, its label,
+and whether its `tools:` are on `PATH`:
 
 ```
 $ rincewind check --hat example
@@ -184,12 +148,6 @@ example: 8 views ok
   cloudy     active    cloudy        sh ✓                    1 view
   elsewhere  inactive                dinsdale ✗ not on PATH  1 view
 ```
-
-A hat that declares no contexts shows nothing there, and that is the whole
-of it: rincewind names no external program of its own — not kubectl, not
-anything — so it cannot know where you are until a hat tells it how to find
-out. Whether your views talk to a cluster, an API or a local script is
-yours to decide and none of the tool's business.
 
 A reload that fails keeps the rows you had:
 the failure is said in full under them,
@@ -204,19 +162,13 @@ and coming back finds the filter, cursor and scroll exactly as they were.
 Both panes scroll: `↑↓`, `⇞`/`⇟` by the screenful, `home`/`end` to the ends,
 and `<` `>` sideways through wide tables — the column names stay put.
 
-`Y` copies what the output pane is showing to the clipboard, as plain text —
-the selection if there is one, otherwise everything the filter left. It uses
-`pbcopy`, `wl-copy`, `xclip` or `xsel`, whichever is on your `PATH`, and also
-sends the terminal's own clipboard escape (OSC 52) so that it works over ssh
-as well. Not every terminal implements OSC 52 — Terminal.app does not — which
-is why the local program is used when there is one; in tmux, OSC 52 needs
-`set-clipboard on`.
-
-The mouse works too: the wheel scrolls whichever pane it points at,
-a click puts the cursor on a row, and clicking a menu entry runs it.
-Press `M` to release the mouse
-when you want the terminal's own text selection back for copying,
-and `M` again to take it back.
+`Y` copies what the output pane is showing, as plain text —
+the selection if there is one, otherwise everything the filter left —
+via `pbcopy`/`wl-copy`/`xclip`/`xsel` when one is on `PATH`,
+plus the terminal's own OSC 52 escape, which is what works over ssh.
+The mouse works too: the wheel scrolls, a click moves the cursor,
+clicking a menu entry runs it,
+and `M` releases the mouse to the terminal for text selection.
 
 ## Build
 
@@ -227,11 +179,12 @@ make release      # all four release binaries in dist/, without publishing
 
 ## Docs
 
+- [docs/hat.md](docs/hat.md) — the hat author's reference:
+  the complete schema, field by field
 - [docs/architecture.md](docs/architecture.md) — pipeline, stdout contract,
-  config schema, error philosophy, decisions
-- [example/](example/) — a hat that invents its own data:
-  no cluster, no kubectl.
-  Read it first when writing a hat of your own
+  error philosophy, decisions
+- [example/](example/) — a hat that invents its own data;
+  read it first when writing a hat of your own
 
 ## Licence
 
