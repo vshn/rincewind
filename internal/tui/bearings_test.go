@@ -1,8 +1,8 @@
 package tui
 
 import (
-	"context"
-	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -28,11 +28,6 @@ func contexts(t *testing.T, defs ...engine.ContextDef) []engine.Context {
 	return out
 }
 
-// says builds a context that always answers with the given label.
-func says(id, label string) engine.ContextDef {
-	return engine.ContextDef{ID: id, Script: `echo '{}'`, Label: `"` + label + `"`}
-}
-
 // chrome builds a model of the given width, with the window message
 // delivered, since everything about the title bar is a question of room.
 func chrome(t *testing.T, width int) *model {
@@ -42,17 +37,26 @@ func chrome(t *testing.T, width int) *model {
 	return next.(*model)
 }
 
-// probing builds a model with a stubbed fallback probe and counts how often
-// it ran. A hat that declares no contexts is what keeps that path alive.
-func probing(t *testing.T, name string) (*model, *int) {
+// counting builds a model whose one context records every run, so a test can
+// count rounds without a stub standing in for the thing being tested: this is
+// the path the tool actually takes.
+func counting(t *testing.T) (*model, func() int) {
 	t.Helper()
-	runs := 0
+	file := filepath.Join(t.TempDir(), "runs")
+
 	m := chrome(t, 96)
-	m.lookupCluster = func(context.Context) (string, error) {
-		runs++
-		return name, nil
+	m.contexts = contexts(t, engine.ContextDef{
+		ID:     "cluster",
+		Script: "echo x >> " + file + `; echo '{"n":"albedaran"}'`,
+		Label:  ".n",
+	})
+	return m, func() int {
+		out, err := os.ReadFile(file)
+		if err != nil {
+			return 0
+		}
+		return len(strings.Fields(string(out)))
 	}
-	return m, &runs
 }
 
 // top is the title bar, stripped of colour.
@@ -189,58 +193,27 @@ func TestNoBearingsShowNothing(t *testing.T) {
 	}
 }
 
-// A hat that declares no contexts keeps the display it always had.
-func TestTheFallbackIsTheKubectlContext(t *testing.T) {
-	m, runs := probing(t, "albedaran")
-
-	next, _ := m.Update(m.refreshBearings()())
-	m = next.(*model)
-
-	if *runs != 1 {
-		t.Fatalf("the fallback probe ran %d times, want once", *runs)
-	}
-	if !strings.Contains(top(m), "albedaran") {
-		t.Errorf("the chrome reads %q, want the kubectl context", top(m))
-	}
-}
-
-// A hat that declares contexts does not run it at all.
-func TestContextsReplaceTheFallback(t *testing.T) {
-	m, runs := probing(t, "albedaran")
-	m.contexts = contexts(t, says("cloudy", "cloudy"))
-
-	next, _ := m.Update(m.refreshBearings()())
-	m = next.(*model)
-
-	if *runs != 0 {
-		t.Errorf("the fallback probe ran %d times beside the hat's contexts", *runs)
-	}
-	if !strings.Contains(top(m), "cloudy") {
-		t.Errorf("the chrome reads %q, want the hat's own answer", top(m))
-	}
-}
-
-// A fallback probe that fails says nothing rather than putting an error in
-// the chrome.
-func TestFailedFallbackIsSilent(t *testing.T) {
+// A hat that declares no contexts has nothing to say about where it is, and
+// the chrome says nothing. Nothing is run to find out, either: this tool does
+// not know what a cluster is, and it used to ask kubectl itself.
+func TestAHatWithoutContextsSaysNothing(t *testing.T) {
 	m := chrome(t, 96)
-	m.lookupCluster = func(context.Context) (string, error) {
-		return "whatever it printed", fmt.Errorf("no kubectl")
-	}
 
-	msg := m.refreshBearings()()
-	if got := msg.(bearingsMsg).found.Labels; len(got) > 0 {
-		t.Errorf("a failed probe reported %q, want nothing", got)
+	if cmd := m.refreshBearings(); cmd != nil {
+		t.Error("a hat that declares no contexts still started a probe")
+	}
+	if !strings.HasSuffix(strings.TrimRight(top(m), "│ "), "One quick row") {
+		t.Errorf("something sits where the labels would be: %q", top(m))
 	}
 }
 
 // Changing the view is what asks again, since that is when one is about to
 // act on something.
 func TestViewChangeResolvesAgain(t *testing.T) {
-	m, runs := probing(t, "albedaran")
+	m, runs := counting(t)
 	drain(t, m, m.Init())
-	if *runs != 1 {
-		t.Fatalf("the probe ran %d times at startup, want once", *runs)
+	if runs() != 1 {
+		t.Fatalf("the contexts resolved %d times at startup, want once", runs())
 	}
 
 	// Past the TTL, or a tab switch would be collapsed into the first round.
@@ -250,35 +223,35 @@ func TestViewChangeResolvesAgain(t *testing.T) {
 	// the one already on screen.
 	press(t, m, "down")
 	press(t, m, "enter")
-	if *runs != 2 {
-		t.Errorf("the probe ran %d times, want it asked again on the new view", *runs)
+	if runs() != 2 {
+		t.Errorf("they resolved %d times, want them asked again on the new view", runs())
 	}
 }
 
 // A key that leaves the view alone must not spawn a process.
 func TestUnrelatedKeysDoNotResolveAgain(t *testing.T) {
-	m, runs := probing(t, "albedaran")
+	m, runs := counting(t)
 	drain(t, m, m.Init())
 	m.bearingsAt = m.bearingsAt.Add(-time.Hour)
 
 	for _, k := range []string{"down", "up", "tab", "M"} {
 		press(t, m, k)
 	}
-	if *runs != 1 {
-		t.Errorf("the probe ran %d times for keys that changed no view, want once", *runs)
+	if runs() != 1 {
+		t.Errorf("they resolved %d times for keys that changed no view, want once", runs())
 	}
 }
 
 // A held-down tab key must not spawn a process per repeat.
 func TestRoundsAreRateLimited(t *testing.T) {
-	m, runs := probing(t, "albedaran")
+	m, runs := counting(t)
 	for range 10 {
 		if cmd := m.refreshBearings(); cmd != nil {
 			cmd()
 		}
 	}
-	if *runs != 1 {
-		t.Errorf("the probe ran %d times in a burst, want the TTL to collapse it to one", *runs)
+	if runs() != 1 {
+		t.Errorf("they resolved %d times in a burst, want the TTL to collapse it to one", runs())
 	}
 }
 

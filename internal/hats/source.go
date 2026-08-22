@@ -37,9 +37,9 @@ type Source struct {
 //	vshn/rincewind-hats
 //	https://github.com/vshn/rincewind-hats[.git]
 //
-// Naming GitHub in Go is the same exception the cluster probe makes for
-// kubectl: a hat cannot say where hats are found, and the topic search only
-// exists there.
+// Naming GitHub in Go is an exception that stops at this package: a hat
+// cannot say where hats are found, and the topic search only exists there.
+// Nothing outside internal/hats knows what any external system is called.
 func ParseSource(s string) (Source, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {

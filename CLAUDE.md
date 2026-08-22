@@ -170,8 +170,9 @@ Both kinds of action open a tab; `esc` closes it.
   A selection narrows the copy; no selection means all of it.
 - **No shelling out to `jq`, `column`, `nc`, `base64` or `sleep` from Go.**
   Each has a Go replacement.
-  The clipboard and git are the exceptions, above, and both for the same
-  reason: that premise is false for them.
+  The clipboard and `internal/hats` are the only exceptions, above,
+  and the clipboard's is about the machine the person is sitting at,
+  never about what a hat is pointed at.
   Scripts in a hat may use whatever they like.
 - **Default shell is `sh` from PATH.**
   Never hardcode `/bin/bash`; per-view `source.shell` is the override.
@@ -192,7 +193,8 @@ Both kinds of action open a tab; `esc` closes it.
   `~/.config/rincewind` is the store, not a hat, and cannot be both.
   Never guess one of the installed hats.
 - **git and GitHub are named in Go only in `internal/hats`**,
-  the second and third such exceptions after kubectl.
+  which is also the only place the binary reaches a remote system at all.
+  Managing hats is the one job that cannot be a hat's own script.
   git is probed on `PATH`; clones are full, never `--depth 1`.
 - **A clone is tried over ssh first, then https.**
   ssh is offered only when it is on `PATH`, and the attempt carries
@@ -204,9 +206,10 @@ Both kinds of action open a tab; `esc` closes it.
   A hat may never declare *that* it is on prod — only how to find out.
   That is what keeps "which cluster one is pointed at cannot come from
   the hat" true now that the hat is the one asking.
-- **`kubectl config current-context` is the fallback**, for a hat that
-  declares no contexts, and the only producer named in Go besides git.
-  The context, never reachability.
+- **No producer is named in Go.** Not kubectl, not anything:
+  a hat may run against a cluster, an API or nothing at all,
+  and the tool cannot tell. A hat that declares no contexts
+  shows nothing top right, and that is the correct answer.
   Re-asked when the view on screen changes, behind a TTL —
   one round for every context, no per-context cadence, and no cache key:
   identical sources already run once per round,
@@ -227,6 +230,12 @@ Both kinds of action open a tab; `esc` closes it.
   A missing binary is news worth reporting — `check` does — and a view
   that hid itself over one would hide the finding.
 - **Probe capabilities, not `runtime.GOOS`.**
+- **The tool is agnostic about what a hat talks to.**
+  Cluster, cloud API, a local script — the engine runs a script and decodes
+  JSON, and no other package may learn more than that.
+  Before adding anything that names an external program, ask whether the hat
+  could name it instead: `source.script`, `source.shell` and `tools:` are
+  where such a name belongs.
 
 ## Imports
 
