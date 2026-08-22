@@ -5,13 +5,13 @@
 package config
 
 import (
-	"cmp"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -141,6 +141,11 @@ type Hat struct {
 	// normalised X.Y.Z, or empty when it asks for none. Checked here for
 	// shape and enforced by whoever knows which version is running.
 	Requires string
+	// requires is the same bound, parsed once at compile; nil when the hat
+	// asks for none. Unmet and Load's merge compare this, never the string,
+	// so a parse cannot fail — and so cannot silently waive the requirement —
+	// anywhere past compile.
+	requires *[3]int
 }
 
 // Unmet says why the running version does not satisfy the hat's `rincewind:`
@@ -159,32 +164,34 @@ type Hat struct {
 // rather than passing in silence. Passing quietly is how one tests a hat
 // locally, ships it, and hands the refusal to whoever is on a release.
 func (h Hat) Unmet(version string) (why string, checked bool) {
-	if h.Requires == "" {
-		return "", true
-	}
-	want, ok := parseVersion(requirement, h.Requires)
-	if !ok {
+	if h.requires == nil {
 		return "", true
 	}
 	got, stamped := measurable(version)
 	if !stamped {
 		return "", false
 	}
-	if compareVersion(got, want) >= 0 {
+	if slices.Compare(got[:], h.requires[:]) >= 0 {
 		return "", true
 	}
 	return fmt.Sprintf("this hat needs rincewind >= %s, and this is %s", h.Requires, version), true
 }
 
 // stamp reads the version the build writes into the binary: a tag, and
-// whatever git describe appended once there was a commit past it.
+// exactly the suffix git describe appends once there is a commit past it.
 //
-// The suffix is dropped and the tag compared, because the tag is a real lower
-// bound on what the build holds: describe names the nearest *ancestor* tag,
-// so v0.6.0-9-gb5802a3 contains v0.6.0 and demonstrably does not contain
+// That suffix is dropped and the tag compared, because the tag is a real
+// lower bound on what the build holds: describe names the nearest *ancestor*
+// tag, so v0.6.0-9-gb5802a3 contains v0.6.0 and demonstrably does not contain
 // v0.7.0 — or v0.7.0 would be the tag it named. Treating such a build as
 // unmeasurable would wave it past a requirement it genuinely does not meet.
-var stamp = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$`)
+//
+// Only that suffix. Every other decoration means the number is not an
+// ancestor tag: goreleaser stamps a snapshot `incpatch`-above the nearest
+// tag — a guess upward about a build that need not contain it — and a
+// pre-release tag like v0.7.0-rc1 names a version that does not exist yet.
+// Both are unmeasurable, and the "not checking" note says so by name.
+var stamp = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)(?:-\d+-g[0-9a-f]+)?$`)
 
 // dirty marks a build made from a working tree that matched no commit.
 const dirty = "-dirty"
@@ -220,20 +227,18 @@ func parseVersion(re *regexp.Regexp, s string) ([3]int, bool) {
 	}
 	var out [3]int
 	for i := range out {
-		if m[i+1] != "" {
-			out[i], _ = strconv.Atoi(m[i+1])
+		if m[i+1] == "" {
+			continue
 		}
+		n, err := strconv.Atoi(m[i+1])
+		if err != nil {
+			// Atoi clamps an overflow and reports it; a number that long is
+			// not a version, not maxInt.
+			return [3]int{}, false
+		}
+		out[i] = n
 	}
 	return out, true
-}
-
-func compareVersion(a, b [3]int) int {
-	for i := range a {
-		if c := cmp.Compare(a[i], b[i]); c != 0 {
-			return c
-		}
-	}
-	return 0
 }
 
 // Load reads and compiles a config file, or every *.yaml in a directory.
@@ -281,14 +286,9 @@ func Load(path string) (Hat, error) {
 		// The hat requires the most any of its files requires. Refusing a
 		// second declaration would be refusing two files for agreeing, and
 		// the higher one is what "requires" means anyway.
-		if hat.Requires == "" {
-			hat.Requires = read.Requires
-		} else if read.Requires != "" {
-			a, _ := parseVersion(requirement, hat.Requires)
-			b, _ := parseVersion(requirement, read.Requires)
-			if compareVersion(b, a) > 0 {
-				hat.Requires = read.Requires
-			}
+		if read.requires != nil &&
+			(hat.requires == nil || slices.Compare(read.requires[:], hat.requires[:]) > 0) {
+			hat.Requires, hat.requires = read.Requires, read.requires
 		}
 	}
 
@@ -354,6 +354,7 @@ func compile(r io.Reader) (Hat, error) {
 			return Hat{}, fmt.Errorf("rincewind: %q is not a version requirement; write \">= 0.8\" or \">= 0.8.1\"", doc.Rincewind)
 		}
 		hat.Requires = fmt.Sprintf("%d.%d.%d", want[0], want[1], want[2])
+		hat.requires = &want
 	}
 	seen := map[string]bool{}
 	for _, c := range doc.Contexts {
@@ -434,7 +435,10 @@ func decode(dec *yaml.Decoder, doc *file) ([]string, error) {
 // do the matching: the alternative is a second list of every key in the
 // schema, kept beside the structs, which would go stale the first time
 // someone added one.
-var unknownField = regexp.MustCompile(`^line (\d+): field (\S+) not found in type (\S+)$`)
+// The key is `.+?` rather than `\S+`: the decoder interpolates it raw, and a
+// quoted YAML key may hold whitespace — one of those must stay a warning, not
+// fall through to fatal.
+var unknownField = regexp.MustCompile(`^line (\d+): field (.+?) not found in type (\S+)$`)
 
 // unknownKey reshapes that message into one a hat's author can act on. The Go
 // type name is no use to them; the line and the word are.

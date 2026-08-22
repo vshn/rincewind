@@ -56,14 +56,8 @@ func sayUnknown(w io.Writer, warnings []string) {
 	for _, warning := range warnings {
 		say(w, "%s\n", warning)
 	}
-	say(w, "\nignored %s — a typo, or a hat written for a newer rincewind (this is %s)\n",
+	// The blank line closes this block the way the "not checking" note closes
+	// its own, so no caller has to re-derive the spacing.
+	say(w, "\nignored %s — a typo, or a hat written for a newer rincewind (this is %s)\n\n",
 		engine.Plural(len(warnings), "unknown key"), version)
-}
-
-// unknownNote is the same thing as an error, for `check --strict`.
-func unknownNote(warnings []string) error {
-	if len(warnings) == 0 {
-		return nil
-	}
-	return fmt.Errorf("%s", engine.Plural(len(warnings), "unknown key"))
 }

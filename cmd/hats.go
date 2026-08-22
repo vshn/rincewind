@@ -246,7 +246,20 @@ func report(out io.Writer, c hats.Clone) error {
 			continue
 		}
 		ok++
-		say(out, "  %-14s %-10s %s\n", h.Name, engine.Plural(len(loaded.Views), "view"), short(h.Path))
+		// The same reading every running command makes, at the one moment a
+		// fresh clone is being looked at: a hat for a newer rincewind is
+		// named here rather than blessed and refused on the first run. It
+		// still counts as loading — upgrading rincewind is what fixes it,
+		// so the clone is worth keeping.
+		if why, _ := loaded.Unmet(version); why != "" {
+			say(out, "  %-14s %s\n", h.Name, why)
+			continue
+		}
+		line := fmt.Sprintf("  %-14s %-10s %s", h.Name, engine.Plural(len(loaded.Views), "view"), short(h.Path))
+		if n := len(loaded.Warnings); n > 0 {
+			line += fmt.Sprintf("  (%s — `check` names them)", engine.Plural(n, "unknown key"))
+		}
+		say(out, "%s\n", line)
 	}
 	if ok == 0 {
 		return fmt.Errorf("no hat in %s loads", c.Slug)

@@ -3,8 +3,6 @@ package cmd
 import (
 	"bytes"
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -184,21 +182,10 @@ func TestViewReportsAFailingScript(t *testing.T) {
 // the notes go: a redirect catches the table, not the report.
 func TestUnknownKeysGoToStderr(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ahead.yaml"), []byte(aheadHat), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeHat(t, dir, "ahead.yaml", aheadHat)
 
 	var o, e bytes.Buffer
-	hatFlag, viewParams = "", nil
-	rootCmd.SetOut(&o)
-	rootCmd.SetErr(&e)
-	rootCmd.SetArgs([]string{"view", "demo.list", "--hat", dir})
-	t.Cleanup(func() {
-		rootCmd.SetOut(nil)
-		rootCmd.SetErr(nil)
-		rootCmd.SetArgs(nil)
-	})
-	if err := rootCmd.Execute(); err != nil {
+	if err := runCmdBuffers(t, "", &o, &e, "view", "demo.list", "--hat", dir); err != nil {
 		t.Fatal(err)
 	}
 

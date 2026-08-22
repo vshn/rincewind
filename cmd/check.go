@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os/exec"
 	"strings"
@@ -39,23 +40,27 @@ var checkCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if len(loaded.Warnings) > 0 {
-			say(out, "\n")
-		}
 
 		say(out, "%s: %s ok\n", path, engine.Plural(len(loaded.Views), "view"))
 		// Said even when it is met: a hat that pins a version is saying
-		// something about itself worth reading before one edits it.
+		// something about itself worth reading before one edits it. The
+		// comparison half is left off when nothing was compared — loadHat's
+		// "not checking" note just said so, and repeating the version here
+		// would read as if it had been measured.
 		if loaded.Requires != "" {
-			say(out, "requires rincewind >= %s, and this is %s\n", loaded.Requires, version)
+			if _, checked := loaded.Unmet(version); checked {
+				say(out, "requires rincewind >= %s, and this is %s\n", loaded.Requires, version)
+			} else {
+				say(out, "requires rincewind >= %s\n", loaded.Requires)
+			}
 		}
 		reportContexts(cmd.Context(), out, loaded)
 
 		// Strict is for the hat's own pipeline: an unknown key there is a
 		// typo, because the author is by definition running the version they
 		// wrote it for.
-		if checkStrict {
-			return unknownNote(loaded.Warnings)
+		if checkStrict && len(loaded.Warnings) > 0 {
+			return errors.New(engine.Plural(len(loaded.Warnings), "unknown key"))
 		}
 		return nil
 	},

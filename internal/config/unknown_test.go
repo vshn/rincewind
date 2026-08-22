@@ -1,6 +1,7 @@
 package config
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -46,6 +47,14 @@ func TestAnUnknownKeyIsNamedWhereItSits(t *testing.T) {
 			name: "in a view",
 			yaml: strings.Replace(valid, "    rows: .items[]", "    zukunft: ja\n    rows: .items[]", 1),
 			want: `unknown key "zukunft" in a view`,
+		},
+		// The decoder interpolates the key raw, so one holding whitespace —
+		// legal YAML, quoted — must land in the same class, not fall through
+		// to fatal.
+		{
+			name: "with a space in the key",
+			yaml: strings.Replace(valid, "    rows: .items[]", "    \"glitzer und funkel\": ja\n    rows: .items[]", 1),
+			want: `unknown key "glitzer und funkel" in a view`,
 		},
 		{
 			name: "in a column",
@@ -182,7 +191,11 @@ func TestAHatMayRequireAVersion(t *testing.T) {
 }
 
 func TestARequirementThatIsNotOneIsRefused(t *testing.T) {
-	for _, written := range []string{`"neulich"`, `"> 0.8"`, `"< 2.0"`, `"0.8.x"`, `"~> 0.8"`} {
+	for _, written := range []string{
+		`"neulich"`, `"> 0.8"`, `"< 2.0"`, `"0.8.x"`, `"~> 0.8"`,
+		// Atoi would clamp this to maxInt; a number that long is a typo.
+		`"99999999999999999999.0"`,
+	} {
 		t.Run(written, func(t *testing.T) {
 			_, err := Parse(strings.NewReader("rincewind: " + written + "\n" + valid))
 			if err == nil {
@@ -223,9 +236,24 @@ func TestUnmet(t *testing.T) {
 		{"a dirty working tree", "0.8.0", "v0.6.0-9-gb5802a3-dirty", false, false},
 		{"a dirty tree on a tag", "0.8.0", "v0.6.0-dirty", false, false},
 		{"a plain go run with nothing to check", "", "dev", false, true},
+
+		// Decorations other than git describe's own mean the number is not
+		// an ancestor tag. goreleaser stamps a snapshot `incpatch`-above the
+		// nearest tag — a guess upward about a build that need not contain
+		// it — and a pre-release tag names a version that does not exist yet.
+		{"a goreleaser snapshot", "0.6.1", "0.6.1-snapshot", false, false},
+		{"a pre-release tag", "0.7.0", "v0.7.0-rc1", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			why, checked := Hat{Requires: tc.requires}.Unmet(tc.version)
+			hat := Hat{Requires: tc.requires}
+			if tc.requires != "" {
+				want, ok := parseVersion(requirement, tc.requires)
+				if !ok {
+					t.Fatalf("the fixture requirement %q does not parse", tc.requires)
+				}
+				hat.requires = &want
+			}
+			why, checked := hat.Unmet(tc.version)
 			if checked != tc.checked {
 				t.Errorf("checked is %v, want %v", checked, tc.checked)
 			}
@@ -262,5 +290,41 @@ views:
 	}
 	if loaded.Requires != "0.9.2" {
 		t.Errorf("requires %q, want the highest of the three", loaded.Requires)
+	}
+}
+
+// schemaNames is a hand-kept map from Go type names to the words a hat is
+// written in, and the fallback in unknownKey degrades silently when an entry
+// is missing. This walk keeps the map honest: every struct reachable from
+// the document root must be named, and nothing else may be.
+func TestSchemaNamesCoverEverySchemaStruct(t *testing.T) {
+	found := map[string]bool{}
+	var walk func(ty reflect.Type)
+	walk = func(ty reflect.Type) {
+		switch ty.Kind() {
+		case reflect.Struct:
+			name := ty.String()
+			if !strings.HasPrefix(name, "config.") || found[name] {
+				return
+			}
+			found[name] = true
+			for i := range ty.NumField() {
+				walk(ty.Field(i).Type)
+			}
+		case reflect.Slice, reflect.Map, reflect.Pointer:
+			walk(ty.Elem())
+		}
+	}
+	walk(reflect.TypeOf(file{}))
+
+	for name := range found {
+		if _, ok := schemaNames[name]; !ok {
+			t.Errorf("schemaNames does not name %s", name)
+		}
+	}
+	for name := range schemaNames {
+		if !found[name] {
+			t.Errorf("schemaNames names %s, which the schema does not reach", name)
+		}
 	}
 }

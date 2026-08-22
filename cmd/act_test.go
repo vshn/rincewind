@@ -15,23 +15,8 @@ import (
 // transcript, and only what the scripts printed is the result.
 func runAction(t *testing.T, stdin string, args ...string) (out, errOut string, err error) {
 	t.Helper()
-	hatsDirFlag, yesFlag, hatFlag = "", false, ""
-	viewParams, actParams = nil, nil
-	actAll, actYes = false, false
-
 	var o, e bytes.Buffer
-	rootCmd.SetOut(&o)
-	rootCmd.SetErr(&e)
-	rootCmd.SetIn(strings.NewReader(stdin))
-	rootCmd.SetArgs(append(args, "--hat", demoHat))
-	t.Cleanup(func() {
-		rootCmd.SetOut(nil)
-		rootCmd.SetErr(nil)
-		rootCmd.SetIn(nil)
-		rootCmd.SetArgs(nil)
-	})
-
-	err = rootCmd.Execute()
+	err = runCmdBuffers(t, stdin, &o, &e, append(args, "--hat", demoHat)...)
 	return o.String(), e.String(), err
 }
 
@@ -252,23 +237,9 @@ func (r tripwire) Read([]byte) (int, error) {
 }
 
 func TestActDashRefusesBeforeReading(t *testing.T) {
-	hatsDirFlag, yesFlag, hatFlag = "", false, ""
-	viewParams, actParams = nil, nil
-	actAll, actYes = false, false
-
 	var o, e bytes.Buffer
-	rootCmd.SetOut(&o)
-	rootCmd.SetErr(&e)
-	rootCmd.SetIn(tripwire{t})
-	rootCmd.SetArgs([]string{"act", "demo.services", "restart", "-", "--hat", demoHat})
-	t.Cleanup(func() {
-		rootCmd.SetOut(nil)
-		rootCmd.SetErr(nil)
-		rootCmd.SetIn(nil)
-		rootCmd.SetArgs(nil)
-	})
-
-	err := rootCmd.Execute()
+	err := runCmdStreams(t, tripwire{t}, &o, &e,
+		"act", "demo.services", "restart", "-", "--hat", demoHat)
 	if err == nil {
 		t.Fatal("keys from stdin were taken without --yes")
 	}
@@ -371,19 +342,9 @@ views:
         name: touch
         script: echo touched
 `)
-	hatFlag = ""
 	var o, e bytes.Buffer
-	rootCmd.SetOut(&o)
-	rootCmd.SetErr(&e)
-	rootCmd.SetIn(strings.NewReader(""))
-	rootCmd.SetArgs([]string{"act", "demo.list", "touch", "a", "--yes", "--hat", dir})
-	t.Cleanup(func() {
-		rootCmd.SetOut(nil)
-		rootCmd.SetErr(nil)
-		rootCmd.SetIn(nil)
-		rootCmd.SetArgs(nil)
-	})
-	if err := rootCmd.Execute(); err != nil {
+	if err := runCmdBuffers(t, "", &o, &e,
+		"act", "demo.list", "touch", "a", "--yes", "--hat", dir); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(e.String(), "context:") {

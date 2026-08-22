@@ -149,18 +149,21 @@ example: 8 views ok
   elsewhere  inactive                dinsdale ✗ not on PATH  1 view
 ```
 
-A hat is read by binaries older than itself, so **a key this build does not
-know is reported and ignored** rather than refused — otherwise one person
-adding a field to a shared hat takes the whole tool away from everyone who has
-not upgraded. A hat that cannot afford that says so:
+A hat is read by binaries older than itself,
+so **a key this build does not know is reported and ignored**
+rather than refused —
+otherwise one person adding a field to a shared hat
+takes the whole tool away from everyone who has not upgraded.
+A hat that cannot afford that says so:
 
 ```yaml
 rincewind: ">= 0.8"
 ```
 
-and an older binary then refuses it by name. `rincewind check --strict` turns
-the notes back into errors, which is what a hat's own pipeline wants: there an
-unknown key is a typo and nothing else.
+and an older binary then refuses it by name.
+`rincewind check --strict` turns the notes back into errors,
+which is what a hat's own pipeline wants:
+there an unknown key is a typo and nothing else.
 
 A reload that fails keeps the rows you had:
 the failure is said in full under them,
