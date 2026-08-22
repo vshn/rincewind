@@ -115,6 +115,12 @@ type Bearings struct {
 	// right when it runs short: the hat decides what survives a narrow
 	// window.
 	Labels []string
+	// Label is the same text by context id, for a report that lists the
+	// contexts one to a line rather than reading them left to right. Two
+	// fields over the same strings, because the two readers want opposite
+	// things of them: one wants the order and does not care whose is whose,
+	// the other wants whose is whose and has its own order.
+	Label map[string]string
 	// Notes carries the probes that could not answer. Nothing is hidden on
 	// their account, so the TUI stays quiet about them; `check` is where
 	// they are reported.
@@ -131,7 +137,10 @@ var contextTimeout = 2 * time.Second
 // a probe that could not answer leaves its context unknown, and unknown hides
 // nothing.
 func Resolve(ctx context.Context, cs []Context) Bearings {
-	b := Bearings{State: make(map[string]State, len(cs))}
+	b := Bearings{
+		State: make(map[string]State, len(cs)),
+		Label: make(map[string]string, len(cs)),
+	}
 
 	// Identical sources run once per round. Two contexts reading the same
 	// kubeconfig — the usual arrangement, since the platform and the cluster
@@ -150,6 +159,7 @@ func Resolve(ctx context.Context, cs []Context) Bearings {
 		b.State[c.ID] = state
 		if label != "" {
 			b.Labels = append(b.Labels, label)
+			b.Label[c.ID] = label
 		}
 		if err != nil {
 			b.Notes = append(b.Notes, fmt.Sprintf("context %q: %v", c.ID, err))

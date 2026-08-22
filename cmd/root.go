@@ -60,23 +60,6 @@ var versionCmd = &cobra.Command{
 	},
 }
 
-var checkCmd = &cobra.Command{
-	Use:   "check",
-	Short: "Validate the hat without starting the TUI",
-	RunE: func(cmd *cobra.Command, _ []string) error {
-		path, err := hat()
-		if err != nil {
-			return err
-		}
-		loaded, err := config.Load(path)
-		if err != nil {
-			return err
-		}
-		say(cmd.OutOrStdout(), "%s: %d views ok\n", path, len(loaded.Views))
-		return nil
-	},
-}
-
 // hat resolves where the views are pulled from: the flag, then the
 // environment, and then nothing. Every *.yaml in it is read, so the views
 // can be kept one file per group.
