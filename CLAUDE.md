@@ -281,7 +281,8 @@ internal/
               script runner, stream decode, gojq, sort, formats;
               Table/Row/Cell, Args/Param/Action
               context.go  contexts, their three states, Resolve → Bearings
-  render/     Table → styled lines
+  render/     Table → styled lines; Plan draws an action's plan for both
+              the job tab and `act` — heading, value box, invocation
   tui/        model.go   bubbletea model, tabs, the update loop, mouse
               bearings.go resolving the contexts, the chrome, what is hidden
               keys.go    the binding table and the movement it causes

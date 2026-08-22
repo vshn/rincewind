@@ -99,23 +99,24 @@ func TestKeyedReportsWhetherRowsCanBeNamed(t *testing.T) {
 	}
 }
 
-// The values are a table: names padded to one width, so a plan of several
-// steps is read down a column rather than across each line.
-func TestValuesLineUpUnderEachOther(t *testing.T) {
-	s := Step{Env: Args{"service": "worker", "replicas": "2", "n": ""}}
+// The values come out in name order, which is what lets a plan of several
+// steps be read down a column: the same variable is in the same place every
+// time, however the map happened to be built.
+func TestValuesAreInNameOrder(t *testing.T) {
+	s := Step{Env: Args{"service": "worker", "replicas": "2", "namespace": ""}}
 
-	want := []string{
-		"  n",
-		"  replicas  2",
-		"  service   worker",
+	want := []Value{
+		{Name: "namespace", Text: ""},
+		{Name: "replicas", Text: "2"},
+		{Name: "service", Text: "worker"},
 	}
 	got := s.Values()
 	if len(got) != len(want) {
-		t.Fatalf("%d lines, want %d: %q", len(got), len(want), got)
+		t.Fatalf("%d values, want %d: %v", len(got), len(want), got)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Errorf("line %d is %q, want %q", i, got[i], want[i])
+			t.Errorf("value %d is %v, want %v", i, got[i], want[i])
 		}
 	}
 }

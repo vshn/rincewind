@@ -166,44 +166,27 @@ type Step struct {
 	Stdin  []byte
 }
 
-// Command renders the invocation for reading: the values, the shell, then
-// the script as written. It is deliberately not one shell-quoted line —
-// that would be a fiction, since the values never enter the script text.
-func (s Step) Command() []string {
-	return append(s.Values(), s.Invocation()...)
+// Value is one variable a step will be given. The pair rather than a line of
+// text, because how it is drawn is not the engine's business: render draws
+// the box, and it sizes the columns across a whole plan.
+type Value struct {
+	Name string
+	Text string
 }
 
-// Values renders the environment as two columns, name then value. Aligned
-// because a plan of many steps is read downwards: the same variable stands
-// in the same place for every row, so what differs between two rows can be
-// seen without reading the names again.
-//
-// len is the right measure here, not lipgloss.Width: a name is held to
-// lowercase ASCII when the hat is loaded, and the values are the last
-// column, which is never padded.
-func (s Step) Values() []string {
+// Values returns the environment in name order, which is the order a plan of
+// many steps is read down: the same variable stands in the same place for
+// every row.
+func (s Step) Values() []Value {
 	names := make([]string, 0, len(s.Env))
-	width := 0
 	for name := range s.Env {
 		names = append(names, name)
-		width = max(width, len(name))
 	}
 	sort.Strings(names)
 
-	out := make([]string, 0, len(names))
+	out := make([]Value, 0, len(names))
 	for _, name := range names {
-		line := fmt.Sprintf("  %-*s  %s", width, name, s.Env[name])
-		out = append(out, strings.TrimRight(line, " "))
-	}
-	return out
-}
-
-// Invocation renders the shell and the script as written, indented under the
-// values that will be handed to it.
-func (s Step) Invocation() []string {
-	out := []string{"  " + strings.Join(s.Shell, " ")}
-	for _, line := range strings.Split(strings.TrimRight(s.Script, "\n"), "\n") {
-		out = append(out, "    "+line)
+		out = append(out, Value{Name: name, Text: s.Env[name]})
 	}
 	return out
 }

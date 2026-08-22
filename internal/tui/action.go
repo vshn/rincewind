@@ -6,8 +6,10 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/vshn/rincewind/internal/engine"
+	"github.com/vshn/rincewind/internal/render"
 )
 
 // actionFor resolves a key to an action of the view on screen. It only
@@ -260,6 +262,23 @@ func (m *model) answer(key string) tea.Cmd {
 	return m.closeTab()
 }
 
+// planStyle is how the job tab paints a plan. The box and the shell line
+// stay dim — `sh -c` is the same line under every step and says nothing
+// about this one — and the script has no colour of this tool's own: it is
+// read, not skimmed, so it takes the terminal's foreground rather than a
+// shade a light background could swallow.
+var planStyle = render.PlanStyle{
+	Head:   paint(headerStyle),
+	Border: paint(dividerStyle),
+	Label:  paint(descStyle),
+}
+
+// paint narrows a style's variadic Render to the one-string shape the
+// renderer takes.
+func paint(s lipgloss.Style) func(string) string {
+	return func(text string) string { return s.Render(text) }
+}
+
 // lines is what the job tab shows, which is the whole interaction: the form
 // while it is being filled in, then for every row the invocation and what it
 // said. The command is there from the moment the values are in, before
@@ -269,23 +288,34 @@ func (j *job) lines(input string) []string {
 		return j.form(input)
 	}
 
+	// Rendered once — the steps never change after planning — and lazily,
+	// so a job a test builds by hand still draws.
+	if j.plan == nil {
+		j.plan = render.Plan(j.action.Name, j.steps, planStyle)
+	}
+	return j.transcript(j.plan)
+}
+
+// pasteLines is the transcript as it goes on the clipboard: the same
+// interaction, with the values as `name=value` lines. The frame reads well
+// on a screen and pastes as furniture, and a copy is how what the tool just
+// ran reaches a ticket or a shell.
+func (j *job) pasteLines() []string {
+	if j.asking() {
+		return j.form("")
+	}
+	return j.transcript(render.PlanText(j.action.Name, j.steps))
+}
+
+// transcript interleaves a rendered plan with what became of each step, and
+// closes with the question or the summary — the tab's whole story, in order.
+func (j *job) transcript(plan [][]string) []string {
 	var out []string
-	for i, s := range j.steps {
+	for i := range j.steps {
 		if i > 0 {
 			out = append(out, "")
 		}
-
-		head := j.action.Name
-		if s.Row != "" {
-			head += "  " + s.Row
-		}
-		out = append(out, headerStyle.Render(head))
-		// The values are lit and the script is dim, because the script is
-		// the same text for every step and the values are what differ.
-		for _, line := range s.Values() {
-			out = append(out, descStyle.Render(line))
-		}
-		out = append(out, dividerStyle.Render(strings.Join(s.Invocation(), "\n")))
+		out = append(out, plan[i]...)
 
 		switch {
 		case !j.done:

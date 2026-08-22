@@ -66,7 +66,7 @@ func TestActionShowsTheCommandBeforeAsking(t *testing.T) {
 	// The count is the engine's to append — see TestConfirmationCarriesTheRowCount.
 	// What the tab owes is the command, and the question under it.
 	content := ansi.Strip(m.View().Content)
-	for _, want := range []string{"name  infra", "sh -c", "echo", "Pause 1", "[y/N]"} {
+	for _, want := range []string{"│ name │ infra", "sh -c", "echo", "Pause 1", "[y/N]"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("the screen is missing %q", want)
 		}
