@@ -280,7 +280,12 @@ func (j *job) lines(input string) []string {
 			head += "  " + s.Row
 		}
 		out = append(out, headerStyle.Render(head))
-		out = append(out, dividerStyle.Render(strings.Join(s.Command(), "\n")))
+		// The values are lit and the script is dim, because the script is
+		// the same text for every step and the values are what differ.
+		for _, line := range s.Values() {
+			out = append(out, descStyle.Render(line))
+		}
+		out = append(out, dividerStyle.Render(strings.Join(s.Invocation(), "\n")))
 
 		switch {
 		case !j.done:

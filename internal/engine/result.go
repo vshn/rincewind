@@ -170,18 +170,38 @@ type Step struct {
 // the script as written. It is deliberately not one shell-quoted line —
 // that would be a fiction, since the values never enter the script text.
 func (s Step) Command() []string {
-	out := make([]string, 0, len(s.Env)+4)
+	return append(s.Values(), s.Invocation()...)
+}
 
+// Values renders the environment as two columns, name then value. Aligned
+// because a plan of many steps is read downwards: the same variable stands
+// in the same place for every row, so what differs between two rows can be
+// seen without reading the names again.
+//
+// len is the right measure here, not lipgloss.Width: a name is held to
+// lowercase ASCII when the hat is loaded, and the values are the last
+// column, which is never padded.
+func (s Step) Values() []string {
 	names := make([]string, 0, len(s.Env))
+	width := 0
 	for name := range s.Env {
 		names = append(names, name)
+		width = max(width, len(name))
 	}
 	sort.Strings(names)
-	for _, name := range names {
-		out = append(out, fmt.Sprintf("  %s=%s", name, s.Env[name]))
-	}
 
-	out = append(out, "  "+strings.Join(s.Shell, " "))
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		line := fmt.Sprintf("  %-*s  %s", width, name, s.Env[name])
+		out = append(out, strings.TrimRight(line, " "))
+	}
+	return out
+}
+
+// Invocation renders the shell and the script as written, indented under the
+// values that will be handed to it.
+func (s Step) Invocation() []string {
+	out := []string{"  " + strings.Join(s.Shell, " ")}
 	for _, line := range strings.Split(strings.TrimRight(s.Script, "\n"), "\n") {
 		out = append(out, "    "+line)
 	}

@@ -30,7 +30,7 @@ func TestActShowsTheCommandBeforeAsking(t *testing.T) {
 
 	// The plan, the row it is about, the values beside the script, and the
 	// hat's own question with the engine's count appended to it.
-	for _, want := range []string{"restart  worker", "service=worker", "replicas=2", "sh -c", "Restart worker", "(1 row)", "[y/N]"} {
+	for _, want := range []string{"restart  worker", "service   worker", "replicas  2", "sh -c", "Restart worker", "(1 row)", "[y/N]"} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("the transcript is missing %q:\n%s", want, errOut)
 		}

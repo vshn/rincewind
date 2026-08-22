@@ -53,7 +53,7 @@ then shows the exact invocations and asks underneath them:
 
 ```
 pause  infra
-  name=infra
+  name  infra
   sh -c
     kubectl patch machineconfigpool "$name" --type merge -p '…'
   machineconfigpool/infra patched
@@ -105,7 +105,7 @@ $ rincewind act argo.apps sync wildfly
 context: c-appuio-lab-cloudscale-rma-0 · cloudscale
 
 sync  wildfly
-  app=wildfly
+  app  wildfly
   sh -c
     argocd app sync "$app"
 

@@ -98,3 +98,24 @@ func TestKeyedReportsWhetherRowsCanBeNamed(t *testing.T) {
 		t.Error("a view without a key expression is marked keyed")
 	}
 }
+
+// The values are a table: names padded to one width, so a plan of several
+// steps is read down a column rather than across each line.
+func TestValuesLineUpUnderEachOther(t *testing.T) {
+	s := Step{Env: Args{"service": "worker", "replicas": "2", "n": ""}}
+
+	want := []string{
+		"  n",
+		"  replicas  2",
+		"  service   worker",
+	}
+	got := s.Values()
+	if len(got) != len(want) {
+		t.Fatalf("%d lines, want %d: %q", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("line %d is %q, want %q", i, got[i], want[i])
+		}
+	}
+}

@@ -117,7 +117,7 @@ So one tab carries the whole interaction, in order:
   ask        name: july-maintenance          answered fields stay on screen
              reason: ▌                       (2 of 4)  why upgrades are suspended
 
-  confirm    name=july-maintenance           the planned step, verbatim
+  confirm    name  july-maintenance           the planned step, verbatim
              sh -c
                kubectl create -f - <<EOF …
              Create upgrade suspension july-maintenance   [y/N]
@@ -181,11 +181,16 @@ It shows the environment, the shell, and the script as written:
 
 ```
 pause  infra
-  name=infra
+  name  infra
   sh -c
     kubectl patch machineconfigpool "$name" --type merge -p '…'
   machineconfigpool/infra patched
 ```
+
+The values are two columns, name then value,
+because a plan of many rows is read downwards:
+the same variable stands in the same place for every step,
+so what differs between two of them is seen without reading the names again.
 
 One step per row means each call names exactly one object,
 so a partial failure is attributable —
