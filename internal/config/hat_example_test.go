@@ -322,3 +322,63 @@ func TestHatDemoChartDrawsSeries(t *testing.T) {
 		t.Errorf("yrange %v, want the fixed 0..100 axis", res.YRange)
 	}
 }
+
+// The hat says where it is: three contexts over one invented source, one of
+// them the identity case with no predicate at all.
+func TestHatDemoContextsResolve(t *testing.T) {
+	hat := demoHat(t)
+	if len(hat.Contexts) != 3 {
+		t.Fatalf("%d contexts, want 3", len(hat.Contexts))
+	}
+
+	b := engine.Resolve(t.Context(), hat.Contexts)
+	want := map[string]engine.State{
+		"cluster":   engine.StateActive,
+		"cloudy":    engine.StateActive,
+		"elsewhere": engine.StateInactive,
+	}
+	for id, state := range want {
+		if got := b.State[id]; got != state {
+			t.Errorf("context %s is %v, want %v", id, got, state)
+		}
+	}
+	if len(b.Notes) > 0 {
+		t.Errorf("notes: %v", b.Notes)
+	}
+
+	// Declaration order, and only from the contexts one is actually in.
+	if got := strings.Join(b.Labels, " · "); got != "demo-cluster · cloudy" {
+		t.Errorf("the chrome would read %q, want the cluster then the platform", got)
+	}
+}
+
+// `needs:` resolves, across files as well as within one.
+func TestHatDemoNeedsNamesItsContexts(t *testing.T) {
+	views := demoViews(t)
+
+	if got := viewByID(t, views, "demo.events").Needs; strings.Join(got, " ") != "cloudy" {
+		t.Errorf("demo.events needs %v, want the context declared in the other file", got)
+	}
+	if got := viewByID(t, views, "demo.volumes").Needs; strings.Join(got, " ") != "elsewhere" {
+		t.Errorf("demo.volumes needs %v, want the inactive context", got)
+	}
+	// Most views name nothing and are therefore shown everywhere.
+	if got := viewByID(t, views, "demo.services").Needs; len(got) > 0 {
+		t.Errorf("demo.services needs %v, want nothing", got)
+	}
+}
+
+// A view its context rules out is still a view: hiding is a menu decision,
+// not a deletion, so it loads and runs like any other.
+func TestHatDemoHiddenViewStillRuns(t *testing.T) {
+	res, err := viewByID(t, demoViews(t), "demo.volumes").Run(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Rows) != 2 {
+		t.Fatalf("%d rows, want 2", len(res.Rows))
+	}
+	if got := cellAt(t, res, 0, "NAME"); got != "pvc-api" {
+		t.Errorf("first row is %q, want pvc-api", got)
+	}
+}
