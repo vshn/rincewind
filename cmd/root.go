@@ -44,11 +44,11 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		views, err := config.Load(path)
+		loaded, err := config.Load(path)
 		if err != nil {
 			return err
 		}
-		return tui.Run(cmd.Context(), views, version)
+		return tui.Run(cmd.Context(), loaded.Views, loaded.Contexts, version)
 	},
 }
 
@@ -57,23 +57,6 @@ var versionCmd = &cobra.Command{
 	Short: "Print the version",
 	Run: func(*cobra.Command, []string) {
 		fmt.Println(version)
-	},
-}
-
-var checkCmd = &cobra.Command{
-	Use:   "check",
-	Short: "Validate the hat without starting the TUI",
-	RunE: func(cmd *cobra.Command, _ []string) error {
-		path, err := hat()
-		if err != nil {
-			return err
-		}
-		views, err := config.Load(path)
-		if err != nil {
-			return err
-		}
-		say(cmd.OutOrStdout(), "%s: %d views ok\n", path, len(views))
-		return nil
 	},
 }
 

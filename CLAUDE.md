@@ -10,7 +10,7 @@ the reasoning for the reversal is recorded in docs/architecture.md.
 
 **Status:** the hat loader, engine pipeline,
 the table view with row selection, view and action parameters,
-and actions — both kinds — are built.
+actions — both kinds — and contexts are built.
 Drill-down is an action that navigates.
 A working action gets a tab that collects its parameters,
 shows the commands, asks, and holds the output.
@@ -21,6 +21,11 @@ the two log views as followed text views.
 Besides the TUI there are two non-interactive commands:
 `view` prints one view, `act` runs one of its actions —
 same engine, rows named by key instead of selected.
+
+A hat's **contexts** say where one is:
+each a script printing JSON, with `active:` and `label:` as jq over it.
+The chrome reads their labels, `needs:` hides the views they rule out,
+`H` brings those back, and `check` reports the lot.
 
 Not built yet: batched (`once:`) actions; a filter for `view`;
 `loki` and `pods`; a managed port-forward for `argo ui`.
@@ -44,6 +49,14 @@ text only, and it excludes `refresh`.
 drawn as a braille time-series plot with a legend.
 No rows, so no selection: `/` picks series by name,
 actions need `scope: none`, and `yrange:` fixes the value axis.
+
+A **context** is what one is in the middle of: a platform, a cluster,
+an environment. One script printing JSON,
+an optional `active:` predicate over the first value it printed,
+and an optional `label:` from the same value.
+No predicate means active whenever the script produced a value —
+the identity case, which is how the cluster's own name is read.
+A view names them with `needs:`, a string or a list.
 
 An **action** does something with the rows a view is showing.
 One mechanism, two kinds:
@@ -144,6 +157,9 @@ Both kinds of action open a tab; `esc` closes it.
   counts them as width.
 - **No blocking work in bubbletea's `Update`.**
   Every script run is a `tea.Cmd`; the `seq` stale-guard stays.
+- **`H` and `M` are upper case**, like every global toggle:
+  `H` shows the views the contexts ruled out, `M` releases the mouse.
+  Lower-case keys belong to the views.
 - **The clipboard is `Y`: OSC 52 always, plus a local writer when there is
   one.**
   OSC 52 alone was the plan and it does not survive contact with Terminal.app,
@@ -161,6 +177,12 @@ Both kinds of action open a tab; `esc` closes it.
   Never hardcode `/bin/bash`; per-view `source.shell` is the override.
 - **Parameters become environment variables**,
   never text templated into the script.
+- **Parameters are printed; the inherited environment is not.**
+  Every value reaching a step is shown before it runs,
+  so a secret must never be a parameter or an action `env:` value —
+  it would land in the job tab, in `Y`, and in `act`'s CI log.
+  A script inherits the real environment whole,
+  and only its *text* is displayed, so `$TOKEN` on screen is a value nowhere.
 - **A hat is code.** `hats install` asks before cloning and `hats update`
   shows `git diff --stat` before applying;
   the topic search is discovery, never a registry.
@@ -178,10 +200,32 @@ Both kinds of action open a tab; `esc` closes it.
   or the fallback never gets its turn.
   `CloneURLs` is the one place that decides the order,
   so what `install` prints is what it runs.
-- **`kubectl config current-context` is the one producer named in Go**,
-  for the cluster shown top right, and nowhere else.
-  Which cluster one is pointed at cannot come from the hat.
-  The context, never reachability; re-asked when the view on screen changes.
+- **The hat asks the question, the world answers it.**
+  A hat may never declare *that* it is on prod — only how to find out.
+  That is what keeps "which cluster one is pointed at cannot come from
+  the hat" true now that the hat is the one asking.
+- **`kubectl config current-context` is the fallback**, for a hat that
+  declares no contexts, and the only producer named in Go besides git.
+  The context, never reachability.
+  Re-asked when the view on screen changes, behind a TTL —
+  one round for every context, no per-context cadence, and no cache key:
+  identical sources already run once per round,
+  and an expensive probe can cache in its own script.
+- **Fail open: active, inactive, unknown.**
+  A bool cannot say the third, and the third is the one that matters.
+  A view is hidden only when *every* context it names is definitively
+  inactive; unknown hides nothing, and nothing is hidden before the first
+  round, which falls out of resolution being a `tea.Cmd` like any other.
+- **Hiding is a filter, never a deletion.**
+  The sidebar's border says how many, `H` brings them back marked,
+  and `view`/`act` run a hidden view without complaint —
+  asking by name is not being offered it in a menu.
+  The menu is rebuilt when what belongs in it changes,
+  never filtered at paint time: the cursor cannot land on a line
+  that is not there.
+- **`tools:` gates nothing.**
+  A missing binary is news worth reporting — `check` does — and a view
+  that hid itself over one would hide the finding.
 - **Probe capabilities, not `runtime.GOOS`.**
 
 ## Imports
@@ -196,7 +240,8 @@ charm.land/bubbletea/v2   charm.land/bubbles/v2   charm.land/lipgloss/v2
 ## Layout
 
 ```
-cmd/          cobra wiring: root (TUI), check, view, act, hats, --hat flag
+cmd/          cobra wiring: root (TUI), view, act, hats, --hat flag
+              check.go   validate, and report the contexts and their tools
               params.go  -p name=value, shared by view and act
 internal/
   config/     YAML → typed defs, schema validation → engine.Def
@@ -204,8 +249,10 @@ internal/
   engine/     Compile(Def) → View, Link resolves navigating actions;
               script runner, stream decode, gojq, sort, formats;
               Table/Row/Cell, Args/Param/Action
+              context.go  contexts, their three states, Resolve → Bearings
   render/     Table → styled lines
   tui/        model.go   bubbletea model, tabs, the update loop, mouse
+              bearings.go resolving the contexts, the chrome, what is hidden
               keys.go    the binding table and the movement it causes
               layout.go  boxes, hit-testing, scroll positions
               paint.go   View and everything it renders
@@ -223,7 +270,7 @@ docs/
 go build ./...
 go test ./...
 go run . --hat example                    # invented data, no cluster needed
-go run . check --hat example              # validate a hat
+go run . check --hat example              # validate a hat, and say where it is
 go run . view demo.services --hat example # print one view, no TUI
 go run . act demo.services restart api --hat example   # run one action
 go run . hats search                      # find hats on GitHub

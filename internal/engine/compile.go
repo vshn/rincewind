@@ -29,9 +29,12 @@ type Def struct {
 	YRange *[2]float64
 	// Follow consumes that output as it is written instead of when the
 	// script exits. Only a text view may.
-	Follow  bool
-	Rows    string // jq: one stdout JSON value → row objects
-	Key     string // jq: row → identity; empty means no stable identity
+	Follow bool
+	Rows   string // jq: one stdout JSON value → row objects
+	Key    string // jq: row → identity; empty means no stable identity
+	// Needs names the contexts this view belongs to. Empty means always
+	// shown; see Context.
+	Needs   []string
 	Params  []Param
 	Columns []ColumnDef
 	Sort    []SortDef
@@ -183,6 +186,7 @@ func newView(d Def, run func(context.Context, Args) (Result, error)) (View, erro
 		Title:   title,
 		Group:   group,
 		Refresh: d.Refresh,
+		Needs:   d.Needs,
 		Params:  d.Params,
 		Actions: actions,
 		Keyed:   d.Key != "",
@@ -196,16 +200,23 @@ func newView(d Def, run func(context.Context, Args) (Result, error)) (View, erro
 const argsVar = "$args"
 
 func compileExpr(view, field, src string) (*gojq.Code, error) {
+	return compileExprIn("view", view, field, src)
+}
+
+// compileExprIn is that for whatever declared the expression. A context is
+// not a view and must not be named as one, but every other word of the
+// message — and every rule about when it is written — is the same.
+func compileExprIn(kind, name, field, src string) (*gojq.Code, error) {
 	if src == "" {
-		return nil, fmt.Errorf("view %q: %s: expression is required", view, field)
+		return nil, fmt.Errorf("%s %q: %s: expression is required", kind, name, field)
 	}
 	q, err := gojq.Parse(src)
 	if err != nil {
-		return nil, fmt.Errorf("view %q: %s: %v", view, field, err)
+		return nil, fmt.Errorf("%s %q: %s: %v", kind, name, field, err)
 	}
 	code, err := gojq.Compile(q, gojq.WithVariables([]string{argsVar}))
 	if err != nil {
-		return nil, fmt.Errorf("view %q: %s: %v", view, field, err)
+		return nil, fmt.Errorf("%s %q: %s: %v", kind, name, field, err)
 	}
 	return code, nil
 }

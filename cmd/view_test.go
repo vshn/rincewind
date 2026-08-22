@@ -15,11 +15,11 @@ const demoHat = "../example"
 
 func demoViews(t *testing.T) []engine.View {
 	t.Helper()
-	views, err := config.Load(demoHat)
+	loaded, err := config.Load(demoHat)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return views
+	return loaded.Views
 }
 
 // The point of the command: a table on stdout, aligned, no frames.

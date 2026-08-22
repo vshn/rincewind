@@ -329,3 +329,64 @@ func TestActReportsAFailingStep(t *testing.T) {
 		t.Errorf("a step after the failure did not run:\n%s", out.String())
 	}
 }
+
+// The command means little without the place: in CI `act … --yes` used to say
+// nothing at all about which cluster it was about to hit.
+func TestActNamesTheContextAboveThePlan(t *testing.T) {
+	out, errOut, err := runAction(t, "", "act", "demo.services", "restart", "api", "--yes")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(errOut, "context: demo-cluster · cloudy") {
+		t.Fatalf("the transcript does not say where it acted:\n%s", errOut)
+	}
+	// Above the plan, so it is read before the invocation it applies to.
+	if strings.Index(errOut, "context:") > strings.Index(errOut, "restart  api") {
+		t.Errorf("the context is under the plan:\n%s", errOut)
+	}
+	// An inactive context is not somewhere one is.
+	if strings.Contains(errOut, "elsewhere") {
+		t.Errorf("an inactive context reached the transcript:\n%s", errOut)
+	}
+	// Transcript, not result: a redirect catches what the scripts printed.
+	if strings.Contains(out, "context:") {
+		t.Errorf("the context line landed on stdout:\n%s", out)
+	}
+}
+
+// A hat with nothing to say about where it is says nothing: an empty label is
+// not a heading.
+func TestActIsQuietWithoutContexts(t *testing.T) {
+	dir := t.TempDir()
+	writeHat(t, dir, "plain.yaml", `
+views:
+  - id: demo.list
+    source: { script: "echo '{\"name\":\"a\"}'" }
+    rows: .
+    key: .name
+    columns: [{name: NAME, expr: .name}]
+    actions:
+      - key: t
+        name: touch
+        script: echo touched
+`)
+	hatFlag = ""
+	var o, e bytes.Buffer
+	rootCmd.SetOut(&o)
+	rootCmd.SetErr(&e)
+	rootCmd.SetIn(strings.NewReader(""))
+	rootCmd.SetArgs([]string{"act", "demo.list", "touch", "a", "--yes", "--hat", dir})
+	t.Cleanup(func() {
+		rootCmd.SetOut(nil)
+		rootCmd.SetErr(nil)
+		rootCmd.SetIn(nil)
+		rootCmd.SetArgs(nil)
+	})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(e.String(), "context:") {
+		t.Errorf("a hat that declares no contexts still got a heading:\n%s", e.String())
+	}
+}

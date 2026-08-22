@@ -23,7 +23,21 @@ import (
 // so a typo like "emphsis" fails with a line number instead of being
 // silently ignored.
 type file struct {
-	Views []view `yaml:"views"`
+	Views    []view     `yaml:"views"`
+	Contexts []ctxEntry `yaml:"contexts"`
+}
+
+// ctxEntry is one context: a script, an optional predicate over what it
+// printed, and an optional label taken from the same value. Named ctxEntry
+// rather than context so nothing in this package reads as the standard
+// library's.
+type ctxEntry struct {
+	ID     string   `yaml:"id"`
+	Short  string   `yaml:"short"`
+	Source source   `yaml:"source"`
+	Active string   `yaml:"active"`
+	Label  string   `yaml:"label"`
+	Tools  []string `yaml:"tools"`
 }
 
 type view struct {
@@ -34,6 +48,7 @@ type view struct {
 	Follow  bool      `yaml:"follow"`
 	Params  []param   `yaml:"params"`
 	Source  source    `yaml:"source"`
+	Needs   names     `yaml:"needs"`
 	Rows    string    `yaml:"rows"`
 	Key     string    `yaml:"key"`
 	Columns []column  `yaml:"columns"`
@@ -84,110 +99,222 @@ type sortBy struct {
 	Rank  []string `yaml:"rank"`
 }
 
+// names is a field written either as one name or as a list of them, which
+// is how `needs:` is read: naming one context is the common case and should
+// not have to look like a list.
+type names []string
+
+func (n *names) UnmarshalYAML(node *yaml.Node) error {
+	var one string
+	if err := node.Decode(&one); err == nil {
+		*n = names{one}
+		return nil
+	}
+	var many []string
+	if err := node.Decode(&many); err != nil {
+		return fmt.Errorf("line %d: needs takes a context id or a list of them", node.Line)
+	}
+	*n = many
+	return nil
+}
+
+// Hat is what a hat holds: the views it offers, and the contexts that say
+// where one is and which of those views apply here. Both are needed
+// together, so they travel together.
+//
+// Not to be confused with hats.Hat, which is a directory in the store; this
+// is what reading one produced.
+type Hat struct {
+	Views    []engine.View
+	Contexts []engine.Context
+}
+
 // Load reads and compiles a config file, or every *.yaml in a directory.
 // A directory keeps one file per group, which is how the views were arranged
 // when they were Go source and is still how one thinks about them.
-func Load(path string) ([]engine.View, error) {
+//
+// Views and contexts both merge across those files: a hat is one hat however
+// it is split up. What may not repeat is an id, of either kind, and a clash
+// across two files names both of them — otherwise the reader is left grepping
+// for the other half.
+func Load(path string) (Hat, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, err
+		return Hat{}, err
 	}
 
 	files := []string{path}
 	if info.IsDir() {
 		if files, err = filepath.Glob(filepath.Join(path, "*.yaml")); err != nil {
-			return nil, err
+			return Hat{}, err
 		}
 		sort.Strings(files) // menu order must not depend on the filesystem
 		if len(files) == 0 {
-			return nil, fmt.Errorf("%s: holds no .yaml files", path)
+			return Hat{}, fmt.Errorf("%s: holds no .yaml files", path)
 		}
 	}
 
-	var views []engine.View
+	var hat Hat
+	from := map[string]string{}
 	for _, name := range files {
 		read, err := loadFile(name)
 		if err != nil {
-			return nil, err
+			return Hat{}, err
 		}
-		views = append(views, read...)
+		for _, c := range read.Contexts {
+			if prev, taken := from[c.ID]; taken {
+				return Hat{}, fmt.Errorf("context %q: declared in %s and in %s", c.ID, prev, name)
+			}
+			from[c.ID] = name
+		}
+		hat.Views = append(hat.Views, read.Views...)
+		hat.Contexts = append(hat.Contexts, read.Contexts...)
 	}
 
-	// One view may open another declared in a different file, so linking
-	// waits until every file has been read.
-	if err := link(views); err != nil {
-		return nil, err
+	// One view may open another declared in a different file, and may name a
+	// context declared in a third, so linking waits until every file has been
+	// read.
+	if err := link(hat); err != nil {
+		return Hat{}, err
 	}
-	return views, nil
+	return hat, nil
 }
 
-func loadFile(path string) ([]engine.View, error) {
+func loadFile(path string) (Hat, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return Hat{}, err
 	}
 	defer f.Close() //nolint:errcheck // read-only
 
-	views, err := compile(f)
+	hat, err := compile(f)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return Hat{}, fmt.Errorf("%s: %w", path, err)
 	}
-	return views, nil
+	return hat, nil
 }
 
 // Parse reads one config document and links it. Split from Load so tests and
 // callers with embedded config need no file.
-func Parse(r io.Reader) ([]engine.View, error) {
-	views, err := compile(r)
+func Parse(r io.Reader) (Hat, error) {
+	hat, err := compile(r)
 	if err != nil {
-		return nil, err
+		return Hat{}, err
 	}
-	if err := link(views); err != nil {
-		return nil, err
+	if err := link(hat); err != nil {
+		return Hat{}, err
 	}
-	return views, nil
+	return hat, nil
 }
 
-// compile turns one document into views, without resolving what its actions
-// open — that needs every other file to have been read first.
-func compile(r io.Reader) ([]engine.View, error) {
+// compile turns one document into views and contexts, without resolving what
+// its actions open or what its views need — both of those can be declared in
+// another file.
+func compile(r io.Reader) (Hat, error) {
 	dec := yaml.NewDecoder(r)
 	dec.KnownFields(true)
 
 	var doc file
 	if err := dec.Decode(&doc); err != nil {
-		return nil, err
+		return Hat{}, err
 	}
 	if len(doc.Views) == 0 {
-		return nil, fmt.Errorf("no views defined")
+		return Hat{}, fmt.Errorf("no views defined")
 	}
 
-	views := make([]engine.View, 0, len(doc.Views))
+	var hat Hat
+	seen := map[string]bool{}
+	for _, c := range doc.Contexts {
+		def, err := toContextDef(c)
+		if err != nil {
+			return Hat{}, err
+		}
+		if seen[def.ID] {
+			return Hat{}, fmt.Errorf("context %q: declared twice", def.ID)
+		}
+		seen[def.ID] = true
+
+		compiled, err := engine.CompileContext(def)
+		if err != nil {
+			return Hat{}, err
+		}
+		hat.Contexts = append(hat.Contexts, compiled)
+	}
+
 	for _, v := range doc.Views {
 		def, err := toDef(v)
 		if err != nil {
-			return nil, err
+			return Hat{}, err
 		}
 		compiled, err := engine.Compile(def)
 		if err != nil {
-			return nil, err
+			return Hat{}, err
 		}
-		views = append(views, compiled)
+		hat.Views = append(hat.Views, compiled)
 	}
-	return views, nil
+	return hat, nil
 }
 
-// link resolves navigating actions and catches an id used twice — which,
-// with several files, is a mistake made across them as easily as within one.
-func link(views []engine.View) error {
+// link resolves navigating actions, holds every `needs:` to a context that
+// exists, and catches an id used twice — which, with several files, is a
+// mistake made across them as easily as within one.
+func link(hat Hat) error {
 	seen := map[string]bool{}
-	for _, v := range views {
+	for _, v := range hat.Views {
 		if seen[v.ID] {
 			return fmt.Errorf("view %q: defined twice", v.ID)
 		}
 		seen[v.ID] = true
 	}
-	return engine.Link(views)
+
+	// A view naming a context nobody declared would be shown always, which is
+	// the opposite of what was meant — the same reason an `open:` target that
+	// is not a view dies here rather than at the keystroke.
+	declared := map[string]bool{}
+	for _, c := range hat.Contexts {
+		declared[c.ID] = true
+	}
+	for _, v := range hat.Views {
+		for _, id := range v.Needs {
+			if !declared[id] {
+				return fmt.Errorf("view %q: needs %q, which is not a context", v.ID, id)
+			}
+		}
+	}
+
+	return engine.Link(hat.Views)
+}
+
+// contextID is what a context may be called. The same shape as a view id
+// without the grouping dot: it is typed in `needs:` and printed by `check`,
+// so it stays a plain word.
+var contextID = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
+
+// toContextDef checks everything the schema can express and hands the rest —
+// the expressions, and whether the context says anything at all — to
+// engine.CompileContext.
+func toContextDef(c ctxEntry) (engine.ContextDef, error) {
+	if c.ID == "" {
+		return engine.ContextDef{}, fmt.Errorf("a context has no id")
+	}
+	if !contextID.MatchString(c.ID) {
+		return engine.ContextDef{}, fmt.Errorf("context %q: an id must be lowercase letters, digits, dashes and underscores", c.ID)
+	}
+	for _, tool := range c.Tools {
+		if strings.TrimSpace(tool) == "" {
+			return engine.ContextDef{}, fmt.Errorf("context %q: a tool has no name", c.ID)
+		}
+	}
+
+	return engine.ContextDef{
+		ID:     c.ID,
+		Short:  c.Short,
+		Shell:  c.Source.Shell,
+		Script: c.Source.Script,
+		Active: c.Active,
+		Label:  c.Label,
+		Tools:  c.Tools,
+	}, nil
 }
 
 // envName is what a parameter may be called. Lowercase only, which keeps
@@ -206,7 +333,7 @@ var reserved = map[string]bool{
 	"esc": true, "up": true, "down": true, "k": true, "j": true,
 	"pgup": true, "pgdown": true, "ctrl+f": true, "ctrl+b": true,
 	"home": true, "end": true, "g": true, "G": true,
-	"r": true, "space": true, " ": true, "a": true, "M": true, "Y": true,
+	"r": true, "space": true, " ": true, "a": true, "H": true, "M": true, "Y": true,
 	"[": true, "]": true, "x": true, "<": true, ">": true,
 }
 
@@ -289,9 +416,16 @@ func toDef(v view) (engine.Def, error) {
 		return fail("follow and refresh exclude each other: a stream is already current")
 	}
 
+	for _, id := range v.Needs {
+		if strings.TrimSpace(id) == "" {
+			return fail("needs: a context has no id")
+		}
+	}
+
 	d := engine.Def{
 		ID:     v.ID,
 		Title:  v.Title,
+		Needs:  v.Needs,
 		Text:   v.Class == "text",
 		Chart:  v.Class == "chart",
 		Follow: v.Follow,

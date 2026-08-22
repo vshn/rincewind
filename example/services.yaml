@@ -5,6 +5,46 @@
 #
 #   rincewind -h example
 
+# Contexts say where one is. A context is a script printing JSON, an optional
+# jq predicate over what it printed, and an optional jq label from the same
+# value: the hat asks the question and the world answers it, which is why a
+# hat can never simply declare that it is on production.
+#
+# These three invent their answer, the way every view here invents its data —
+# and they invent it from one script, which the engine runs once per round
+# however many contexts read it.
+contexts:
+  # The identity case: no `active:`, so it is active whenever the script
+  # produced a value at all, and its label is what the chrome reads first.
+  # This is the entry a real hat writes as `kubectl config view --minify`.
+  - id: cluster
+    short: Which cluster the scripts would run against
+    source:
+      script: echo '{"context":"demo-cluster","platform":"cloudy"}'
+    label: .context
+    tools: [sh]
+
+  # A condition rather than an identity, and it holds here.
+  - id: cloudy
+    short: The invented platform these views are about
+    source:
+      script: echo '{"context":"demo-cluster","platform":"cloudy"}'
+    active: '.platform == "cloudy"'
+    label: .platform
+    tools: [sh]
+
+  # And one that does not hold, which is what hides a view. Its tool is not
+  # on anybody's PATH — deliberately, because `tools:` gates nothing: a
+  # missing binary is news worth reporting, and a view that hid itself over
+  # one would hide the finding. `rincewind check` says so; nothing else does.
+  - id: elsewhere
+    short: A platform this session is not on
+    source:
+      script: echo '{"context":"demo-cluster","platform":"cloudy"}'
+    active: '.platform == "elsewhere"'
+    label: '"elsewhere"'
+    tools: [dinsdale]
+
 views:
   # Two echo calls emit two JSON documents. The stdout contract is a *stream*
   # of JSON values and `rows` runs over each, so a script can pull from
@@ -150,6 +190,30 @@ views:
         confirm: '"Restart the service \($args.service)"'
         script: echo "restarted $service"
         reload: true
+
+  # A view for a platform this session is not on: every context it names is
+  # definitively inactive, so the menu leaves it out and says how many it
+  # left out. `H` brings them back, marked. It is still perfectly runnable by
+  # name — `rincewind view demo.volumes` — because asking for something is
+  # not the same as being offered it.
+  - id: demo.volumes
+    title: Volumes, on the platform this session is not on
+    needs: elsewhere
+    source:
+      script: |
+        echo '{"items":[
+          {"name":"pvc-api","size":"20Gi","state":"Bound"},
+          {"name":"pvc-cache","size":"5Gi","state":"Pending"}]}'
+    rows: .items[]
+    key: .name
+    columns:
+      - name: NAME
+        expr: .name
+      - name: SIZE
+        expr: .size
+      - name: STATE
+        expr: .state
+        emphasis: { Bound: good, Pending: warn }
 
   # A text view: the script's output is the answer, verbatim. No rows, no
   # columns, no jq — and no collapsing of whitespace, which is why a log

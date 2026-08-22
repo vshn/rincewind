@@ -40,11 +40,17 @@ const (
 const runTimeout = 30 * time.Second
 
 // entry is one line in the sidebar. A nil view marks a group header, which
-// the cursor skips over.
+// the cursor skips over. waits names the contexts a view is waiting for, and
+// is set only on one its contexts ruled out — which is in the list at all
+// only while the hidden ones are being shown.
 type entry struct {
 	label string
 	view  *engine.View
+	waits string
 }
+
+// hidden reports whether this entry is one the contexts ruled out.
+func (e entry) hidden() bool { return e.waits != "" }
 
 // resultMsg carries a finished view run. The seq names the tab it belongs
 // to, so a slow run cannot overwrite the output of a newer one or of
@@ -211,21 +217,36 @@ func (t *tab) stop() {
 }
 
 type model struct {
+	// views is the whole hat, kept because the menu is rebuilt from it: what
+	// belongs in the list changes when the contexts resolve, and again when
+	// H asks for the rest.
+	views   []engine.View
 	entries []entry
 	cursor  int
+	// hiddenCount is how many views the contexts ruled out, whether or not
+	// they are being shown; the sidebar's border says so.
+	hiddenCount int
+	// showHidden is H: the filter undone. Hiding is a filter and never a
+	// deletion, so there has to be a way back.
+	showHidden bool
 
 	// version is shown in the footer; the binary stamps it at build time.
 	version string
 
-	// cluster is the kubectl context the scripts will run against, shown top
-	// right wherever acting on the wrong one would be expensive. Empty when
-	// there is no answer, and then nothing is shown at all.
-	cluster string
-	// clusterAt is when it was last asked, so a burst of view changes costs
-	// one probe rather than one each.
-	clusterAt time.Time
-	// lookupCluster is the probe. Run sets it; newModel leaves it nil, so
-	// the tests never spawn a process and never depend on a kubeconfig.
+	// contexts are the hat's: what it asks the world in order to say where
+	// one is, and which of its views apply here. Run sets them; newModel
+	// leaves them empty, so a test resolves nothing it did not ask for.
+	contexts []engine.Context
+	// bearings is the last round's answer — the labels the chrome reads top
+	// right, and what became of every context. Empty when nothing answered,
+	// and then nothing is shown at all.
+	bearings engine.Bearings
+	// bearingsAt is when they were last asked for, so a burst of view changes
+	// costs one round rather than one each.
+	bearingsAt time.Time
+	// lookupCluster is the fallback probe, for a hat that declares no
+	// contexts. Run sets it; newModel leaves it nil, so the tests never spawn
+	// a process and never depend on a kubeconfig.
 	lookupCluster func(context.Context) (string, error)
 
 	// clipboard is the local clipboard writer, or nil for OSC 52 alone. Run
@@ -295,9 +316,10 @@ func (m *model) cur() *tab { return m.tabs[m.active] }
 // cancelled — which is what a signal does. Handing the context to bubbletea
 // is what makes a SIGTERM come back through prog.Run, so the scripts still
 // running are stopped rather than orphaned by a process that just ends.
-func Run(ctx context.Context, views []engine.View, version string) error {
+func Run(ctx context.Context, views []engine.View, contexts []engine.Context, version string) error {
 	m := newModel(views)
 	m.version = version
+	m.contexts = contexts
 	m.lookupCluster = kubeContext
 	m.clipboard = localClipboard()
 
@@ -317,6 +339,7 @@ func Run(ctx context.Context, views []engine.View, version string) error {
 
 func newModel(views []engine.View) *model {
 	m := &model{
+		views: views,
 		spin:  spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 		vp:    viewport.New(),
 		mouse: true,
@@ -329,17 +352,43 @@ func newModel(views []engine.View) *model {
 	// table row would make the columns meaningless.
 	m.vp.SoftWrap = false
 
+	m.buildEntries()
+	// The content box always has a tab, even before anything has run.
+	m.tabs = []*tab{newTab(m.selected(), nil)}
+
+	return m
+}
+
+// buildEntries lays the menu out from the views the hat holds.
+//
+// The list is rebuilt whenever what belongs in it changes — a round of
+// resolution, or H — rather than being filtered while it is painted: painting
+// must stay free of decisions, and the cursor must never be able to come to
+// rest on a line that is not there.
+func (m *model) buildEntries() {
+	// The entry under the cursor is a view, not an index: rebuilding moves
+	// the indices about, and one is looking at whatever one was looking at.
+	was := m.selected()
+
+	m.entries, m.hiddenCount = nil, 0
+
 	// Groups appear in order of first use; views keep the config file's
 	// order within them. An empty group name lists its views without a
 	// header.
 	var order []string
 	byGroup := map[string][]*engine.View{}
-	for i := range views {
-		v := &views[i]
+	for i := range m.views {
+		v := &m.views[i]
 		// A view needing a parameter cannot be started from the menu, so it
 		// is not offered there; an action reaches it with one.
 		if !v.Listed() {
 			continue
+		}
+		if m.ruledOut(v) {
+			m.hiddenCount++
+			if !m.showHidden {
+				continue
+			}
 		}
 		if _, seen := byGroup[v.Group]; !seen {
 			order = append(order, v.Group)
@@ -357,16 +406,26 @@ func newModel(views []engine.View) *model {
 			if label == "" {
 				label = v.ID
 			}
-			m.entries = append(m.entries, entry{label: label, view: v})
+			e := entry{label: label, view: v}
+			if m.ruledOut(v) {
+				// Marked rather than passed off as ordinary: it is here
+				// because it was asked for, and it names what it is waiting
+				// for.
+				e.waits = strings.Join(v.Needs, " ")
+			}
+			m.entries = append(m.entries, e)
 		}
 	}
 
-	// Start on the first real view rather than on a header.
+	// Start on the first real view rather than on a header, unless the one
+	// that was there is still in the list.
 	m.cursor = m.next(-1, +1)
-	// The content box always has a tab, even before anything has run.
-	m.tabs = []*tab{newTab(m.selected(), nil)}
-
-	return m
+	for i, e := range m.entries {
+		if was != nil && e.view == was {
+			m.cursor = i
+			break
+		}
+	}
 }
 
 // next returns the index of the nearest selectable entry from i in direction
@@ -448,9 +507,9 @@ func (m *model) total() int {
 	}
 }
 
-// Init asks which cluster this is before anything else: the answer belongs
-// on screen from the first paint, not from the first view run.
-func (m *model) Init() tea.Cmd { return m.refreshCluster() }
+// Init asks where this is before anything else: the answer belongs on screen
+// from the first paint, not from the first view run.
+func (m *model) Init() tea.Cmd { return m.refreshBearings() }
 
 // stop cancels the run in flight, if any.
 // stopAll cancels every run in flight, on quit.
@@ -503,8 +562,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.onKey(msg)
 
-	case clusterMsg:
-		m.cluster = msg.name
+	case bearingsMsg:
+		m.bearings = msg.found
+		// What the contexts found is what decides the menu, so the list is
+		// laid out again here rather than consulted while painting.
+		m.buildEntries()
+		m.syncSidebar()
 		return m, nil
 
 	case copiedMsg:

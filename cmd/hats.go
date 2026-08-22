@@ -237,13 +237,16 @@ func report(out io.Writer, c hats.Clone) error {
 
 	ok := 0
 	for _, h := range c.Hats {
-		views, err := config.Load(h.Path)
+		// `loaded` rather than `hat`: h is the directory in the store, and
+		// config.Hat is what is written inside it. The two must not read as
+		// one thing in the one function where both appear.
+		loaded, err := config.Load(h.Path)
 		if err != nil {
 			say(out, "  %-14s does not load: %v\n", h.Name, err)
 			continue
 		}
 		ok++
-		say(out, "  %-14s %-10s %s\n", h.Name, engine.Plural(len(views), "view"), short(h.Path))
+		say(out, "  %-14s %-10s %s\n", h.Name, engine.Plural(len(loaded.Views), "view"), short(h.Path))
 	}
 	if ok == 0 {
 		return fmt.Errorf("no hat in %s loads", c.Slug)

@@ -74,7 +74,7 @@ export RINCEWIND_HAT=~/.config/rincewind/vshn-rincewind-hats/albedaran
 
 rincewind                      # TUI, on the hat above
 rincewind --hat ./example      # try it without a cluster, no install needed
-rincewind check                # validate the hat without starting the TUI
+rincewind check                # validate the hat, and say where it thinks it is
 rincewind view nodes.status    # print one view and exit, no TUI
 rincewind act nodes.status cordon node-a   # run one of its actions
 ```
@@ -100,6 +100,8 @@ key — run it without any to see them, or `--all` for every row:
 
 ```
 $ rincewind act argo.apps sync wildfly
+context: c-appuio-lab-cloudscale-rma-0 · cloudscale
+
 sync  wildfly
   app=wildfly
   sh -c
@@ -134,9 +136,58 @@ drawn as a braille plot with a legend, later series on top.
 `/` picks series by name, `yrange:` fixes the value axis,
 and [example/metrics.yaml](example/metrics.yaml) is the reference.
 
-The kubectl context is shown top right, and asked for again whenever the view
-changes — so what you are about to act on is on screen before you act.
-Without a kubectl, or without a current context, nothing is shown there.
+A hat serves a team, and a team's clusters sit on different platforms.
+**Contexts** say where you are, so the views that only make sense elsewhere
+can get out of the way. A context is a script that prints JSON, with jq over
+it:
+
+```yaml
+contexts:
+  - id: kubernetes
+    source:
+      script: kubectl config view --minify -o json
+    label: '."current-context"'          # what it contributes to the chrome
+    tools: [kubectl]
+    # no active: → active whenever the script produced a value
+
+  - id: cloudscale
+    short: Cloudscale-managed clusters
+    source:
+      script: kubectl config view --minify -o json
+    active: '."current-context" | test("-cloudscale-")'
+    label: '"cloudscale"'
+    tools: [cloudscale-cli]
+
+views:
+  - id: nodes.volumes
+    needs: cloudscale                    # string or list; absent means always shown
+```
+
+The labels are shown top right — `c-appuio-lab-cloudscale-rma-0 · cloudscale` —
+and asked for again whenever the view changes, so what you are about to act on
+is on screen before you act. The hat only ever says how to find out, never
+where it is: that answer has to come from the world.
+
+A view is hidden only when **every** context it names is definitively
+inactive. A probe that could not run hides nothing. The sidebar says how many
+it left out and `H` brings them back, marked with the context they are waiting
+for — and a hidden view still runs perfectly well by name. `tools:` gates
+nothing at all: `rincewind check` reports what is missing, because a binary
+you have not installed is news, not a reason to hide the view that would have
+told you.
+
+```
+$ rincewind check --hat example
+example: 8 views ok
+
+  cluster    active    demo-cluster  sh ✓
+  cloudy     active    cloudy        sh ✓                    1 view
+  elsewhere  inactive                dinsdale ✗ not on PATH  1 view
+```
+
+A hat that declares no contexts falls back to `kubectl config
+current-context` for the display, exactly as before. Without a kubectl, or
+without a current context, nothing is shown there.
 
 A reload that fails keeps the rows you had:
 the failure is said in full under them,

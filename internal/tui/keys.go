@@ -6,14 +6,14 @@ import tea "charm.land/bubbletea/v2"
 // key is the whole binding table; boundKeys beside it is what a test holds
 // against the reserved set in internal/config.
 
-// onKey handles a key and re-probes the cluster when the view on screen has
+// onKey handles a key and asks again where one is when the view on screen has
 // changed. Hooking it here rather than in open, drill, activate and closeTab
 // keeps the four from drifting apart, and covers whatever is added next.
 func (m *model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	before := m.cur().view
 	next, cmd := m.key(msg)
 	if m.cur().view != before {
-		if probe := m.refreshCluster(); probe != nil {
+		if probe := m.refreshBearings(); probe != nil {
 			return next, tea.Batch(cmd, probe)
 		}
 	}
@@ -174,6 +174,14 @@ func (m *model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.toggleAll()
 		return m, nil
 
+	case "H":
+		// Hiding is a filter, not a deletion, so there is a way back. Upper
+		// case, like M: the lower-case letters belong to the views.
+		m.showHidden = !m.showHidden
+		m.buildEntries()
+		m.syncSidebar()
+		return m, nil
+
 	case "M":
 		// Releasing the mouse hands text selection back to the terminal,
 		// which is how one copies a node name out of a row. Upper case: the
@@ -208,7 +216,7 @@ func (m *model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 var boundKeys = []string{
 	"q", "ctrl+c", "/", "tab", "<", ">", "esc",
 	"up", "k", "down", "j", "pgdown", "ctrl+f", "pgup", "ctrl+b",
-	"home", "g", "end", "G", "r", "Y", "enter", "space", " ", "a", "M",
+	"home", "g", "end", "G", "r", "Y", "enter", "space", " ", "a", "H", "M",
 	"]", "[", "shift+tab", "x",
 }
 

@@ -6,8 +6,11 @@ views:
   # A calendar rather than a health list: ordered by when things happened,
   # newest first. Ordering by severity would move rows about on every
   # reload; what needs attention is picked out by colour instead.
+  # `needs:` names a context declared in another file — a hat is one hat
+  # however it is split up. This one resolves active, so nothing is hidden.
   - id: demo.events
     title: What happened lately
+    needs: cloudy
     refresh: 30s
     source:
       script: |

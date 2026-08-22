@@ -50,11 +50,11 @@ var actCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		views, err := config.Load(path)
+		loaded, err := config.Load(path)
 		if err != nil {
 			return err
 		}
-		v, err := find(views, args[0], path)
+		v, err := find(loaded.Views, args[0], path)
 		if err != nil {
 			return err
 		}
@@ -62,11 +62,11 @@ var actCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return runAct(cmd, v, a, args[2:])
+		return runAct(cmd, loaded.Contexts, v, a, args[2:])
 	},
 }
 
-func runAct(cmd *cobra.Command, v engine.View, a engine.Action, keys []string) error {
+func runAct(cmd *cobra.Command, contexts []engine.Context, v engine.View, a engine.Action, keys []string) error {
 	out, errOut, in := cmd.OutOrStdout(), cmd.ErrOrStderr(), cmd.InOrStdin()
 
 	// Navigating is looking, and looking is what `view` does. The refusal
@@ -96,6 +96,7 @@ func runAct(cmd *cobra.Command, v engine.View, a engine.Action, keys []string) e
 	if err != nil {
 		return err
 	}
+	writeBearings(cmd.Context(), errOut, contexts)
 	writePlan(errOut, a, steps)
 
 	// The question is asked about the same values the commands were built
@@ -294,6 +295,24 @@ func paramValues(a engine.Action, args engine.Args) map[string]string {
 	return out
 }
 
+// writeBearings names where the work is about to happen, above the plan.
+// `act … --yes` in a CI job said nothing at all about which cluster it was
+// hitting, and "the command is on screen before it runs" has to cover that
+// too: the command means little without the place.
+//
+// Nothing resolved is no line at all. An empty label is not a heading, and a
+// hat that declares no contexts has nothing to say here.
+func writeBearings(ctx context.Context, w io.Writer, contexts []engine.Context) {
+	if len(contexts) == 0 {
+		return
+	}
+	found := engine.Resolve(ctx, contexts)
+	if len(found.Labels) == 0 {
+		return
+	}
+	say(w, "context: %s\n\n", strings.Join(found.Labels, " · "))
+}
+
 // writePlan prints what is about to run, one invocation per row. Not one
 // shell-quoted line: the values travel beside the script, never inside it,
 // and a quoted one-liner would misrepresent what runs.
@@ -455,14 +474,14 @@ func completeAct(_ *cobra.Command, args []string, _ string) ([]cobra.Completion,
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	views, err := config.Load(path)
+	loaded, err := config.Load(path)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 
 	if len(args) == 0 {
 		var out []cobra.Completion
-		for _, v := range views {
+		for _, v := range loaded.Views {
 			if len(v.Actions) > 0 {
 				out = append(out, cobra.CompletionWithDesc(v.ID, v.Title))
 			}
@@ -470,7 +489,7 @@ func completeAct(_ *cobra.Command, args []string, _ string) ([]cobra.Completion,
 		return out, cobra.ShellCompDirectiveNoFileComp
 	}
 
-	v, err := find(views, args[0], path)
+	v, err := find(loaded.Views, args[0], path)
 	if err != nil || len(args) > 1 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}

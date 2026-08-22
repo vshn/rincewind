@@ -215,6 +215,9 @@ type View struct {
 	Title   string
 	Group   string
 	Refresh time.Duration
+	// Needs names the contexts this view belongs to: it is hidden only where
+	// every one of them is definitively inactive. Empty means always shown.
+	Needs   []string
 	Params  []Param
 	Actions []Action
 	Run     func(ctx context.Context, args Args) (Result, error)
