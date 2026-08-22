@@ -893,10 +893,11 @@ Reversing that decision means answering it:
 1. **Load-time validation.**
    Every expression is compiled at startup,
    sort keys are checked against column names,
-   ids for uniqueness, enums for their values;
-   unknown YAML fields are rejected with a line number.
-   A typo dies before any script runs, naming the view and the field.
+   ids for uniqueness, enums for their values.
+   A mistake dies before any script runs, naming the view and the field.
    `rincewind check` runs just this.
+   The one thing that does *not* die here is a key the schema has never
+   heard of — see "A hat outlives the binary that reads it".
 2. **Runtime failures are per cell, not per view.**
    A column expression that errors renders `!err` in that cell
    and one note below the table;
@@ -914,6 +915,97 @@ Reversing that decision means answering it:
    and pressing `esc` mid-reload left an empty view behind without saying so.
    The cost is that an action can act on rows that have gone stale;
    the marker is what makes that a decision rather than a surprise.
+
+## A hat outlives the binary that reads it
+
+A hat travels separately from the tool.
+`hats install` clones a repository, `hats update` pulls it,
+and the binary is released on its own cadence —
+so at any moment somebody is running an old rincewind against a new hat.
+
+That direction used to be fatal.
+The decoder ran with `KnownFields(true)`,
+so a key it did not recognise was a load error,
+and a load error takes the whole hat:
+one person adding `contexts:` to a shared hat repository
+took the entire tool away from everyone who had not upgraded.
+Not a degraded tool — no views at all.
+
+The trade was upside down.
+Strictness is there to catch `emphsis:`, and a typo costs one column its
+colour; version skew cost the hat.
+The big loss was being taken to avoid the small one.
+
+**So a key the schema does not know is reported and ignored.**
+Nothing in the file distinguishes a typo from a hat written for a newer
+rincewind, and a build cannot be asked to tell them apart:
+
+```
+services.yaml: line 14: unknown key "contexts" in a hat
+services.yaml: line 22: unknown key "needs" in a view
+
+ignored 2 unknown keys — a typo, or a hat written for a newer rincewind
+(this is v0.6.0)
+```
+
+Only that class is downgraded.
+The decoder collects its type errors and finishes the document either way,
+so the ones that are not "field X not found" are separated out and still kill
+the load — a `refresh:` holding a list is still a refusal.
+What the schema *does* know is held to it exactly as before.
+
+Most schema growth degrades correctly on its own.
+`needs:` unread means the view is shown,
+which is the same failing-open the contexts themselves do.
+
+### When ignoring is the wrong answer
+
+Not every field is safe to skip.
+A hypothetical `redact: true` on a column, ignored,
+shows precisely what it was written to hide.
+Only the hat's author knows which kind theirs is, so only they can say:
+
+```yaml
+rincewind: ">= 0.8"
+```
+
+A lower bound and nothing else.
+A hat can know which version first understood it;
+it cannot know which version will stop.
+Across files the highest wins —
+refusing two files for agreeing would be absurd.
+
+**Only a version that can be compared is held to it.**
+The stamp is `git describe`, and its tag is a real lower bound on the
+contents: describe names the nearest *ancestor* tag,
+so `v0.6.0-9-gb5802a3` holds v0.6.0 and demonstrably does not hold v0.7.0 —
+or v0.7.0 is what it would have named.
+Such a build is measured on its tag.
+
+Two stamps are not.
+**`dev`**, which a plain `go run .` writes, carries no version at all.
+**`-dirty`** is a working tree matching no commit:
+the committed half is measurable and the rest is unknown,
+and the unknown half is exactly where the feature the hat is waiting for
+lives while somebody is writing it.
+Measuring a version that lies about its own contents is worse than
+declining to.
+
+A clean checkout and every release stay measurable, which is what the rule is
+for.
+An unmeasured run **says so** rather than passing in silence:
+silence is how one tests a hat locally, ships it,
+and hands the refusal to whoever is running a release.
+
+### Where the typo protection went
+
+To the hat's own pipeline, which is where it belongs.
+`rincewind check --strict` makes an unknown key an error,
+and there the reading is unambiguous —
+the author is by definition running the version they are writing for.
+`check` needs no cluster to do it:
+the contexts resolve to unknown, the tools report as missing,
+and neither is a failure.
 
 ## Results are data, not text
 
@@ -1101,6 +1193,12 @@ example/           a hat that invents its data, and the config fixture
 | One cadence for every context, and no cache key | A context is expected to be cheap and identical sources already run once per round; a caching mechanism built on speculation is the wrong shape committed to early, and a hat with an expensive probe can cache in its own script |
 | Identical sources run once per round | The platform and the cluster name usually fall out of the same kubeconfig read, and reading it twice per view change is a cost with nothing to show for it |
 | `act` names the context above the plan | In CI `act … --yes` said nothing at all about which cluster it hit; "the command is on screen before it runs" has to cover the place as well as the command |
+| A key the schema does not know is reported and ignored, not refused | A hat travels separately from the binary, so somebody is always running an old tool against a new hat; refusing took the whole hat away to avoid a typo costing one column its colour |
+| Only the "field not found" class is downgraded | Everything the schema does know is still held to it at load time, which is the whole of the error philosophy and is not what changed |
+| The unknown-key report reads the decoder's own message back | The alternative is a second list of every key in the schema, kept beside the structs, which goes stale the first time someone adds one |
+| A hat may declare a minimum version, as a lower bound only | Ignoring a key is right where its absence degrades harmlessly and wrong where it does not — a `redact:` ignored shows what it was to hide — and only the author knows which; and a hat can know which version first understood it, never which will stop |
+| `dev` and `-dirty` builds are not held to that minimum, and say so | Neither says anything comparable — a dirty tree is exactly where the awaited feature lives while it is written — and refusing the person writing it would make the rule hated; saying nothing would let one test locally and hand the refusal to whoever is on a release |
+| The typo protection moves to `check --strict` | In the hat's own pipeline the reading is unambiguous: the author is running the version they wrote for, so an unknown key is a typo |
 | A hat is a directory, one file per group | Sixteen views in one file is unreadable; it is also how they were arranged as Go source |
 | `--hat` has no short form; `-h` is help | The frequency argument that once justified taking `-h` went away when `$RINCEWIND_HAT` became the way to choose a hat: what is left is a universal convention, broken for three saved characters |
 | The mouse toggle is `M`, not `m` | Lower-case letters belong to the views, which have far more use for them than one global toggle |

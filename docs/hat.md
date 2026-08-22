@@ -15,6 +15,32 @@ Read it beside this page.
 Every mistake below dies there, naming the view and the field,
 before any script runs.
 
+A key this schema does not list is **reported and ignored**, not refused:
+a hat is read by binaries older than itself,
+and nothing in the file tells a typo from a field written for a newer
+rincewind.
+`check --strict` turns those notes into errors,
+which is what a hat's own pipeline wants —
+there the author is running the version they wrote for.
+
+## Requiring a version
+
+```yaml
+rincewind: ">= 0.8"       # optional; also ">= 0.8.1" or "0.8.1"
+```
+
+The least version of the tool this hat needs.
+Write it only when ignoring a field would be *wrong* rather than merely
+lossy — most are harmless, `needs:` unread just shows the view —
+and an older binary then refuses the hat by name instead of misreading it.
+
+A lower bound and nothing else:
+a hat can know which version first understood it,
+not which one will stop.
+Declared in any file, and across files the highest wins.
+Builds stamped `dev` or `-dirty` are not held to it,
+because neither says anything that can be compared.
+
 ## The contract
 
 A source script prints a **stream of JSON values** on stdout —

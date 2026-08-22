@@ -27,7 +27,9 @@ each a script printing JSON, with `active:` and `label:` as jq over it.
 The chrome reads their labels, `needs:` hides the views they rule out,
 `H` brings those back, and `check` reports the lot.
 
-Not built yet: batched (`once:`) actions; a filter for `view`;
+Not built yet: the hat repo's own `check --strict` pipeline,
+which waits on rincewind being public;
+batched (`once:`) actions; a filter for `view`;
 `loki` and `pods`; a managed port-forward for `argo ui`.
 
 ## Docs
@@ -146,6 +148,21 @@ Both kinds of action open a tab; `esc` closes it.
   time**, naming view and action —
   including an `open` target that does not exist
   and an argument the target does not declare.
+- **A key the schema does not know is the one exception**, and is reported
+  rather than refused.
+  A hat is read by binaries older than itself,
+  and nothing in the file tells a typo from a field written for a newer
+  rincewind.
+  Only the decoder's "field not found" class is downgraded;
+  every other type error still kills the load.
+  `check --strict` turns the notes back into errors, for a hat's own CI.
+- **A hat may write `rincewind: ">= 0.8"`** when ignoring a field would be
+  wrong rather than lossy.
+  A lower bound only, and `dev` and `-dirty` builds are not held to it —
+  neither says anything comparable, and a dirty tree is where the awaited
+  feature lives while it is written.
+  An unmeasured run says so; silence would ship the refusal to whoever is
+  on a release.
 - **The menu wraps at both ends, the table never does.**
   Only single steps, not paging: the menu is short and visible whole,
   a long table is not.
@@ -254,6 +271,7 @@ charm.land/bubbletea/v2   charm.land/bubbles/v2   charm.land/lipgloss/v2
 
 ```
 cmd/          cobra wiring: root (TUI), view, act, hats, --hat flag
+              hat.go     one load path: unknown keys, version requirement
               check.go   validate, and report the contexts and their tools
               params.go  -p name=value, shared by view and act
 internal/
@@ -284,6 +302,7 @@ go build ./...
 go test ./...
 go run . --hat example                    # invented data, no cluster needed
 go run . check --hat example              # validate a hat, and say where it is
+go run . check --hat example --strict     # an unknown key is then an error
 go run . view demo.services --hat example # print one view, no TUI
 go run . act demo.services restart api --hat example   # run one action
 go run . hats search                      # find hats on GitHub
