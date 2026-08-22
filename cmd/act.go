@@ -50,11 +50,11 @@ var actCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		views, err := config.Load(path)
+		loaded, err := config.Load(path)
 		if err != nil {
 			return err
 		}
-		v, err := find(views, args[0], path)
+		v, err := find(loaded.Views, args[0], path)
 		if err != nil {
 			return err
 		}
@@ -455,14 +455,14 @@ func completeAct(_ *cobra.Command, args []string, _ string) ([]cobra.Completion,
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	views, err := config.Load(path)
+	loaded, err := config.Load(path)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 
 	if len(args) == 0 {
 		var out []cobra.Completion
-		for _, v := range views {
+		for _, v := range loaded.Views {
 			if len(v.Actions) > 0 {
 				out = append(out, cobra.CompletionWithDesc(v.ID, v.Title))
 			}
@@ -470,7 +470,7 @@ func completeAct(_ *cobra.Command, args []string, _ string) ([]cobra.Completion,
 		return out, cobra.ShellCompDirectiveNoFileComp
 	}
 
-	v, err := find(views, args[0], path)
+	v, err := find(loaded.Views, args[0], path)
 	if err != nil || len(args) > 1 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}

@@ -44,10 +44,11 @@ views:
 `
 
 func TestValidConfigCompiles(t *testing.T) {
-	views, err := Parse(strings.NewReader(valid))
+	loaded, err := Parse(strings.NewReader(valid))
 	if err != nil {
 		t.Fatal(err)
 	}
+	views := loaded.Views
 	if len(views) != 1 || views[0].ID != "demo.list" {
 		t.Fatalf("got %+v, want one view demo.list", views)
 	}
@@ -167,11 +168,11 @@ func TestBrokenConfigsFailWithContext(t *testing.T) {
 // The same end-to-end path for a chart: the stream becomes series, in script
 // order, with both time spellings and Prometheus' string-encoded samples read.
 func TestParsedChartRuns(t *testing.T) {
-	views, err := Parse(strings.NewReader(chart))
+	loaded, err := Parse(strings.NewReader(chart))
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := views[0].Run(t.Context(), nil)
+	res, err := loaded.Views[0].Run(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,11 +195,11 @@ func TestParsedChartRuns(t *testing.T) {
 
 // The end-to-end path: a parsed view actually runs its script.
 func TestParsedViewRuns(t *testing.T) {
-	views, err := Parse(strings.NewReader(valid))
+	loaded, err := Parse(strings.NewReader(valid))
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := views[0].Run(t.Context(), nil)
+	res, err := loaded.Views[0].Run(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

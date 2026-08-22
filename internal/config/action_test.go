@@ -43,10 +43,11 @@ views:
 `
 
 func TestActionsCompile(t *testing.T) {
-	views, err := Parse(strings.NewReader(withActions))
+	loaded, err := Parse(strings.NewReader(withActions))
 	if err != nil {
 		t.Fatal(err)
 	}
+	views := loaded.Views
 
 	pools := views[0]
 	if len(pools.Actions) != 2 {

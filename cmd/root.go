@@ -44,11 +44,11 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		views, err := config.Load(path)
+		loaded, err := config.Load(path)
 		if err != nil {
 			return err
 		}
-		return tui.Run(cmd.Context(), views, version)
+		return tui.Run(cmd.Context(), loaded.Views, version)
 	},
 }
 
@@ -68,11 +68,11 @@ var checkCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		views, err := config.Load(path)
+		loaded, err := config.Load(path)
 		if err != nil {
 			return err
 		}
-		say(cmd.OutOrStdout(), "%s: %d views ok\n", path, len(views))
+		say(cmd.OutOrStdout(), "%s: %d views ok\n", path, len(loaded.Views))
 		return nil
 	},
 }

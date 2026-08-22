@@ -29,9 +29,12 @@ type Def struct {
 	YRange *[2]float64
 	// Follow consumes that output as it is written instead of when the
 	// script exits. Only a text view may.
-	Follow  bool
-	Rows    string // jq: one stdout JSON value → row objects
-	Key     string // jq: row → identity; empty means no stable identity
+	Follow bool
+	Rows   string // jq: one stdout JSON value → row objects
+	Key    string // jq: row → identity; empty means no stable identity
+	// Needs names the contexts this view belongs to. Empty means always
+	// shown; see Context.
+	Needs   []string
 	Params  []Param
 	Columns []ColumnDef
 	Sort    []SortDef
@@ -183,6 +186,7 @@ func newView(d Def, run func(context.Context, Args) (Result, error)) (View, erro
 		Title:   title,
 		Group:   group,
 		Refresh: d.Refresh,
+		Needs:   d.Needs,
 		Params:  d.Params,
 		Actions: actions,
 		Keyed:   d.Key != "",
