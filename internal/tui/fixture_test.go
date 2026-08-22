@@ -254,3 +254,23 @@ func sampleViews() []engine.View {
 		},
 	}
 }
+
+// gatedViews is a menu of four: two that belong everywhere, one that waits on
+// a single context, and one that names two — the case where either being
+// active is enough.
+func gatedViews() []engine.View {
+	quick := func(id, name string, needs ...string) engine.View {
+		return engine.View{
+			ID: "demo." + id, Name: name, Title: name, Group: "demo", Needs: needs,
+			Run: func(context.Context, engine.Args) (engine.Result, error) {
+				return engine.Result{Cols: []string{"N"}, Rows: []engine.Row{row(name)}}, nil
+			},
+		}
+	}
+	return []engine.View{
+		quick("services", "services"),
+		quick("volumes", "volumes", "elsewhere"),
+		quick("either", "either", "elsewhere", "cloudy"),
+		quick("events", "events"),
+	}
+}

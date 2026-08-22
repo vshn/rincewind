@@ -333,7 +333,7 @@ var reserved = map[string]bool{
 	"esc": true, "up": true, "down": true, "k": true, "j": true,
 	"pgup": true, "pgdown": true, "ctrl+f": true, "ctrl+b": true,
 	"home": true, "end": true, "g": true, "G": true,
-	"r": true, "space": true, " ": true, "a": true, "M": true, "Y": true,
+	"r": true, "space": true, " ": true, "a": true, "H": true, "M": true, "Y": true,
 	"[": true, "]": true, "x": true, "<": true, ">": true,
 }
 

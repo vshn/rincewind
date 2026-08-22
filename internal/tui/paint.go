@@ -79,7 +79,7 @@ func (m *model) View() tea.View {
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top,
 		box{w: sidebarWidth, h: m.sidebarBoxHeight(), border: sideBorder,
-			topRight: m.sidebarMore()}.render(m.sidebarLines()),
+			topRight: m.sidebarMore(), bottom: m.hiddenLabel()}.render(m.sidebarLines()),
 		right,
 	)
 
@@ -181,6 +181,20 @@ func (m *model) sidebarMore() string {
 	return dividerStyle.Render(" ↕ ")
 }
 
+// hiddenLabel says how many views the contexts ruled out, and which key
+// brings them back. It rides in the sidebar's bottom border the way the
+// scroll position rides in the content box's top one: a menu that quietly
+// dropped four entries would be a tool one cannot trust.
+func (m *model) hiddenLabel() string {
+	if m.hiddenCount == 0 {
+		return ""
+	}
+	if m.showHidden {
+		return dividerStyle.Render(fmt.Sprintf(" H hides %d ", m.hiddenCount))
+	}
+	return dividerStyle.Render(fmt.Sprintf(" %d hidden · H ", m.hiddenCount))
+}
+
 // contentLines is what the content frame holds: the sticky header, the
 // scrolling pane, and the status line pinned to the frame's bottom edge
 // when there is one.
@@ -230,18 +244,32 @@ func (m *model) sidebarRender() (lines []string, owner []int) {
 	}
 
 	for i, e := range m.entries {
-		switch {
-		case e.view == nil:
+		if e.view == nil {
 			if i > 0 {
 				add("", -1)
 			}
 			add(groupStyle.Render(e.label), -1)
+			continue
+		}
+
+		label := "  " + e.label
+		if i == m.cursor {
+			label = "▸ " + e.label
+		}
+		// A view that is only here because H asked for it says what it is
+		// waiting for. That is the marking: it must not read as an ordinary
+		// entry, and a name is more use than a shade.
+		if e.hidden() {
+			label += "  " + e.waits
+		}
+
+		switch {
 		case i == m.cursor && m.focus == paneList:
-			add(cursorStyle.Render("▸ "+e.label), i)
-		case i == m.cursor:
-			add(dividerStyle.Render("▸ "+e.label), i)
+			add(cursorStyle.Render(label), i)
+		case i == m.cursor, e.hidden():
+			add(dividerStyle.Render(label), i)
 		default:
-			add("  "+e.label, i)
+			add(label, i)
 		}
 	}
 	return lines, owner

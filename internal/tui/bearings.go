@@ -152,3 +152,22 @@ func renderLabels(labels []string) string {
 	}
 	return strings.Join(parts, sepStyle.Render(chromeSep))
 }
+
+// ruledOut reports whether every context a view names has resolved away.
+//
+// Every one of them: a view naming two contexts belongs here if either is
+// active, and one context that could not be found out shows it too. Failing
+// open is the rule — a view disappears only when the world has definitively
+// said it does not belong here, never because a probe was slow, broken or has
+// not run yet.
+func (m *model) ruledOut(v *engine.View) bool {
+	if len(v.Needs) == 0 {
+		return false
+	}
+	for _, id := range v.Needs {
+		if m.bearings.State[id] != engine.StateInactive {
+			return false
+		}
+	}
+	return true
+}

@@ -174,6 +174,14 @@ func (m *model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.toggleAll()
 		return m, nil
 
+	case "H":
+		// Hiding is a filter, not a deletion, so there is a way back. Upper
+		// case, like M: the lower-case letters belong to the views.
+		m.showHidden = !m.showHidden
+		m.buildEntries()
+		m.syncSidebar()
+		return m, nil
+
 	case "M":
 		// Releasing the mouse hands text selection back to the terminal,
 		// which is how one copies a node name out of a row. Upper case: the
@@ -208,7 +216,7 @@ func (m *model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 var boundKeys = []string{
 	"q", "ctrl+c", "/", "tab", "<", ">", "esc",
 	"up", "k", "down", "j", "pgdown", "ctrl+f", "pgup", "ctrl+b",
-	"home", "g", "end", "G", "r", "Y", "enter", "space", " ", "a", "M",
+	"home", "g", "end", "G", "r", "Y", "enter", "space", " ", "a", "H", "M",
 	"]", "[", "shift+tab", "x",
 }
 
