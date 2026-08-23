@@ -164,7 +164,9 @@ type job struct {
 	vals map[string]string
 	idx  int
 
-	steps  []engine.Step
+	steps []engine.Step
+	plan  [][]string // the rendered plan, one chunk per step; steps never
+	// change once planned, so this is built once rather than per repaint
 	prompt string     // set once planned and a confirmation is wanted
 	out    [][]string // what each step printed, filled in as they finish
 	errs   []error    // and how it went wrong, per step

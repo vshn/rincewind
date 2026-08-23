@@ -159,7 +159,7 @@ func TestCollectedValuesReachTheCommand(t *testing.T) {
 	m.Update(key("enter")) // take the default
 
 	content := ansi.Strip(m.View().Content)
-	for _, want := range []string{"name=infra", "size=3", "Create pool infra", "[y/N]"} {
+	for _, want := range []string{"│ name │ infra", "│ size │ 3", "Create pool infra", "[y/N]"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("the screen is missing %q", want)
 		}

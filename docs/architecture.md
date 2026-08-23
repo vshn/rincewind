@@ -117,7 +117,9 @@ So one tab carries the whole interaction, in order:
   ask        name: july-maintenance          answered fields stay on screen
              reason: ▌                       (2 of 4)  why upgrades are suspended
 
-  confirm    name=july-maintenance           the planned step, verbatim
+  confirm    ╭──────┬──────────────────╮      the planned step, verbatim
+             │ name │ july-maintenance │
+             ╰──────┴──────────────────╯
              sh -c
                kubectl create -f - <<EOF …
              Create upgrade suspension july-maintenance   [y/N]
@@ -181,11 +183,21 @@ It shows the environment, the shell, and the script as written:
 
 ```
 pause  infra
-  name=infra
+  ╭──────┬───────╮
+  │ name │ infra │
+  ╰──────┴───────╯
   sh -c
     kubectl patch machineconfigpool "$name" --type merge -p '…'
   machineconfigpool/infra patched
 ```
+
+The values are a table of their own, name beside value,
+and every step of one plan draws it at the same width:
+a plan of many rows is read downwards,
+and a column that changes width from one step to the next is not a column.
+The frame is `render`'s, not the engine's —
+`Step.Values` answers with pairs,
+so the same plan can be drawn for a screen and written to a pipe.
 
 One step per row means each call names exactly one object,
 so a partial failure is attributable —
@@ -409,7 +421,8 @@ What goes over is **plain text**:
 the header with the rows, so a table of values does not arrive without its
 column names;
 a log verbatim, indentation kept;
-and a job's commands and output with the styling and the padding taken off,
+and a job's commands and output with the styling and the padding taken off —
+the values' frame too, back to `name=value` lines —
 which is how what the tool just ran reaches a ticket or a shell.
 
 **A large copy says how large — but only when OSC 52 is alone.**

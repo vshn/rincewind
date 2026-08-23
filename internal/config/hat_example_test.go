@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -180,8 +181,8 @@ func TestHatDemoActionsPlanWhatTheyWouldRun(t *testing.T) {
 	if got := steps[0].Env["service"]; got != "worker" {
 		t.Errorf("first step is about %q, want worker", got)
 	}
-	if got := strings.Join(steps[0].Command(), "\n"); !strings.Contains(got, "replicas=2") {
-		t.Errorf("the command shown %q lost the derived value", got)
+	if got := steps[0].Values(); !slices.Contains(got, engine.Value{Name: "replicas", Text: "2"}) {
+		t.Errorf("the values shown %v lost the derived one", got)
 	}
 
 	// Working on nothing: one step, its values derived from the collected

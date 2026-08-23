@@ -98,3 +98,25 @@ func TestKeyedReportsWhetherRowsCanBeNamed(t *testing.T) {
 		t.Error("a view without a key expression is marked keyed")
 	}
 }
+
+// The values come out in name order, which is what lets a plan of several
+// steps be read down a column: the same variable is in the same place every
+// time, however the map happened to be built.
+func TestValuesAreInNameOrder(t *testing.T) {
+	s := Step{Env: Args{"service": "worker", "replicas": "2", "namespace": ""}}
+
+	want := []Value{
+		{Name: "namespace", Text: ""},
+		{Name: "replicas", Text: "2"},
+		{Name: "service", Text: "worker"},
+	}
+	got := s.Values()
+	if len(got) != len(want) {
+		t.Fatalf("%d values, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("value %d is %v, want %v", i, got[i], want[i])
+		}
+	}
+}

@@ -60,10 +60,12 @@ func (m *model) copyLines() (lines []string, what string) {
 
 	// A job's commands are worth copying on their own — that is how the
 	// thing this tool just ran gets into a ticket or a shell. Its lines are
-	// built styled and padded for the pane, so both come off again: a paste
-	// carrying escape codes and trailing spaces is a paste one has to clean.
+	// built styled and padded for the pane, so both come off again — and the
+	// values' frame comes off with them, back to `name=value`: a paste
+	// carrying escape codes, alignment spaces or box-drawing is a paste one
+	// has to clean.
 	if t.job != nil {
-		for _, line := range t.job.lines("") {
+		for _, line := range t.job.pasteLines() {
 			lines = append(lines, strings.TrimRight(ansi.Strip(line), " \t"))
 		}
 		return lines, engine.Plural(len(lines), "line")

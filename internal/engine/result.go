@@ -166,24 +166,27 @@ type Step struct {
 	Stdin  []byte
 }
 
-// Command renders the invocation for reading: the values, the shell, then
-// the script as written. It is deliberately not one shell-quoted line —
-// that would be a fiction, since the values never enter the script text.
-func (s Step) Command() []string {
-	out := make([]string, 0, len(s.Env)+4)
+// Value is one variable a step will be given. The pair rather than a line of
+// text, because how it is drawn is not the engine's business: render draws
+// the box, and it sizes the columns across a whole plan.
+type Value struct {
+	Name string
+	Text string
+}
 
+// Values returns the environment in name order, which is the order a plan of
+// many steps is read down: the same variable stands in the same place for
+// every row.
+func (s Step) Values() []Value {
 	names := make([]string, 0, len(s.Env))
 	for name := range s.Env {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	for _, name := range names {
-		out = append(out, fmt.Sprintf("  %s=%s", name, s.Env[name]))
-	}
 
-	out = append(out, "  "+strings.Join(s.Shell, " "))
-	for _, line := range strings.Split(strings.TrimRight(s.Script, "\n"), "\n") {
-		out = append(out, "    "+line)
+	out := make([]Value, 0, len(names))
+	for _, name := range names {
+		out = append(out, Value{Name: name, Text: s.Env[name]})
 	}
 	return out
 }

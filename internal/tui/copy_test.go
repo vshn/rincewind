@@ -152,6 +152,14 @@ func TestCopyTakesAJobsCommands(t *testing.T) {
 	if strings.Contains(got, "\x1b") {
 		t.Errorf("an escape sequence went to the clipboard: %q", got)
 	}
+	// The values leave as `name=value`, not as the pane's frame: a paste
+	// goes into a ticket or a shell, and box-drawing is furniture there.
+	if strings.ContainsAny(got, "╭│╰") {
+		t.Errorf("box-drawing went to the clipboard:\n%s", got)
+	}
+	if !strings.Contains(got, "=") {
+		t.Errorf("the values are not name=value lines:\n%s", got)
+	}
 }
 
 // The clipboard writer is found on PATH, not decided by the platform.

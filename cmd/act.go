@@ -10,6 +10,7 @@ import (
 
 	"github.com/vshn/rincewind/internal/config"
 	"github.com/vshn/rincewind/internal/engine"
+	"github.com/vshn/rincewind/internal/render"
 )
 
 var (
@@ -316,17 +317,16 @@ func writeBearings(ctx context.Context, w io.Writer, contexts []engine.Context) 
 // writePlan prints what is about to run, one invocation per row. Not one
 // shell-quoted line: the values travel beside the script, never inside it,
 // and a quoted one-liner would misrepresent what runs.
+//
+// The same renderer the TUI draws with, so the shape cannot depend on which
+// half draws it — and unpainted deliberately, even on a terminal: this is
+// the transcript, a log first, and it reads the same in a CI job as here.
 func writePlan(w io.Writer, a engine.Action, steps []engine.Step) {
-	for i, s := range steps {
+	for i, chunk := range render.Plan(a.Name, steps, render.PlanStyle{}) {
 		if i > 0 {
 			say(w, "\n")
 		}
-		head := a.Name
-		if s.Row != "" {
-			head += "  " + s.Row
-		}
-		say(w, "%s\n", head)
-		for _, line := range s.Command() {
+		for _, line := range chunk {
 			say(w, "%s\n", line)
 		}
 	}
